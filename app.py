@@ -60,25 +60,31 @@ def apply_base_css() -> None:
             div[data-testid="stMetricLabel"] {font-size: 0.78rem !important;}
             .deal-header {
                 border: 1px solid #d7dbe2;
-                border-radius: 10px;
-                padding: 0.55rem 0.7rem;
-                margin-bottom: 0.55rem;
+                border-radius: 12px;
+                padding: 0.7rem 0.9rem;
+                margin-bottom: 0.6rem;
                 background: #fbfcfe;
             }
             .deal-title {
-                font-size: 1.38rem;
+                font-size: 1.9rem;
+                font-weight: 900;
+                line-height: 1.08;
+                margin-right: 0.55rem;
+            }
+            .deal-number {
+                font-size: 1.05rem;
                 font-weight: 800;
-                line-height: 1.15;
-                margin-right: 0.45rem;
+                color: #475467;
+                margin-right: 0.5rem;
             }
             .am-badge {
                 display: inline-block;
-                padding: 0.2rem 0.55rem;
+                padding: 0.28rem 0.7rem;
                 border-radius: 999px;
                 border: 1px solid #c9daf8;
                 background: #eef4ff;
-                font-size: 1.0rem;
-                font-weight: 800;
+                font-size: 1.1rem;
+                font-weight: 900;
             }
             .deal-subtitle {
                 margin-top: 0.2rem;
@@ -107,8 +113,30 @@ def apply_base_css() -> None:
             .presenter-panel {
                 border: 1px solid #dfe6ef;
                 border-radius: 12px;
-                padding: 0.65rem 0.8rem;
+                padding: 0.7rem 0.85rem;
                 background: white;
+                height: 100%;
+            }
+            .kpi-comment {
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 0.55rem 0.7rem;
+                background: #ffffff;
+                margin-top: 0.45rem;
+                min-height: 5.4rem;
+            }
+            .kpi-comment .label {
+                color: #6b7280;
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.02em;
+                margin-bottom: 0.2rem;
+            }
+            .kpi-comment .value {
+                font-size: 0.95rem;
+                line-height: 1.32;
+                white-space: pre-wrap;
+                font-weight: 600;
             }
             .presenter-section-title {
                 font-size: 0.86rem;
@@ -243,9 +271,14 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 
 
 
-def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str]:
+def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str]:
     with st.sidebar:
         st.header("Review filters")
+        workspace_mode = st.radio(
+            "Workspace",
+            ["Review workspace", "Overview", "Bulk update"],
+            index=0,
+        )
         comment_date = st.date_input("Current week comment date", value=st.session_state.get("comment_date", date.today()))
         st.session_state["comment_date"] = comment_date
         show_hidden = st.checkbox("Include workbook-hidden rows", value=False)
@@ -309,7 +342,7 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str]:
         "Last comment date desc": "Last comment date desc",
     }
     sorted_df = sort_deals(filtered_df, sort_lookup[sort_mode]).reset_index(drop=True)
-    return sorted_df, comment_date, queue_view
+    return sorted_df, comment_date, queue_view, workspace_mode
 
 
 
@@ -345,14 +378,17 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
 
 def render_deal_header(selected: pd.Series, queue_position: int, queue_total: int) -> None:
     subtitle = (
-        f"Deal #{safe_text(selected.get('Deal Number'))} · {safe_text(selected.get('Location'))} · "
-        f"{safe_text(selected.get('Bridge / Term'))} · Queue {queue_position} of {queue_total}"
+        f"{safe_text(selected.get('Location'))} · {safe_text(selected.get('Bridge / Term'))} · "
+        f"Queue {queue_position} of {queue_total}"
     )
     st.markdown(
         f"""
         <div class="deal-header">
-            <div><span class="deal-title">{safe_text(selected.get('Deal Name'))}</span>
-            <span class="am-badge">AM: {safe_text(selected.get('Asset Manager'))}</span></div>
+            <div>
+                <span class="deal-title">{safe_text(selected.get('Deal Name'))}</span>
+                <span class="deal-number">#{safe_text(selected.get('Deal Number'))}</span>
+                <span class="am-badge">AM: {safe_text(selected.get('Asset Manager'))}</span>
+            </div>
             <div class="deal-subtitle">{subtitle}</div>
         </div>
         """,
@@ -362,15 +398,18 @@ def render_deal_header(selected: pd.Series, queue_position: int, queue_total: in
 
 
 def render_metric_strip(selected: pd.Series) -> None:
-    cols = st.columns(8)
+    cols = st.columns(7)
     cols[0].metric("UPB", metric_currency(selected.get("Current UPB")))
     cols[1].metric("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")))
     cols[2].metric("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")))
     cols[3].metric("ARV", metric_currency(selected.get("Salesforce ARV")))
     cols[4].metric("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")))
     cols[5].metric("DQ", safe_text(selected.get("Current DQ Status")))
-    cols[6].metric("6/30 NPL", safe_text(selected.get("6/30 NPL")))
-    cols[7].metric("Last comment", metric_date(selected.get("Last Comment Date")))
+    cols[6].metric("Last comment date", metric_date(selected.get("Last Comment Date")))
+    st.markdown(
+        f"<div class='kpi-comment'><div class='label'>Previous weekly comment</div><div class='value'>{safe_text(selected.get('Previous Weekly Comment'))}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_status_chips(selected: pd.Series) -> None:
@@ -469,7 +508,7 @@ def render_review_form(
     render_metric_strip(selected)
     render_status_chips(selected)
     with st.form(f"detail_form_{int(selected['_excel_row'])}"):
-        top_left, top_right = st.columns([1.55, 1.05])
+        top_left, top_right = st.columns([1.7, 1.15])
         updates: dict[str, Any] = {}
 
         with top_left:
@@ -709,9 +748,6 @@ def main() -> None:
     st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="expanded")
     apply_base_css()
 
-    st.title("NPL deal review")
-    st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
-
     file_bytes, workbook_name = get_active_workbook()
     if file_bytes is None:
         return
@@ -736,13 +772,17 @@ def main() -> None:
 
     visible_count = int((~display_df["_workbook_hidden"]).sum())
     hidden_count = int(display_df["_workbook_hidden"].sum())
-    with st.expander("Workbook details", expanded=False):
-        st.caption(
-            f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
-        )
 
-    sorted_df, comment_date, queue_view = apply_filters(display_df)
+    sorted_df, comment_date, queue_view, workspace_mode = apply_filters(display_df)
     st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
+
+    if workspace_mode != "Review workspace":
+        st.title("NPL deal review")
+        st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
+        with st.expander("Workbook details", expanded=False):
+            st.caption(
+                f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
+            )
 
     if sorted_df.empty:
         st.warning("No deals match the current filters.")
@@ -753,25 +793,9 @@ def main() -> None:
     selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
     queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
     queue_total = len(sorted_df)
-
-    tab_overview, tab_review, tab_bulk = st.tabs(["Overview", "Review workspace", "Bulk update"])
-
-    with tab_overview:
+    if workspace_mode == "Overview":
         render_overview(sorted_df, parsed.get("snapshot_label"), picklists)
-
-    with tab_review:
-        render_deal_header(selected, queue_position, queue_total)
-        updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
-        if updates:
-            st.session_state["editor_df"] = apply_detail_edit(
-                st.session_state["editor_df"],
-                int(selected["_excel_row"]),
-                updates,
-                comment_date,
-            )
-            st.rerun()
-
-    with tab_bulk:
+    elif workspace_mode == "Bulk update":
         edited_subset = render_bulk_edit(sorted_df, picklists, comment_date)
         if edited_subset is not None:
             full_editor = st.session_state["editor_df"].set_index("_excel_row")
@@ -786,6 +810,17 @@ def main() -> None:
                         full_editor.loc[row_num, header] = edited_lookup.loc[row_num, header]
             st.session_state["editor_df"] = refresh_editor_derived_fields(full_editor.reset_index(), comment_date)
             st.success("Bulk grid changes applied in the app view.")
+            st.rerun()
+    else:
+        render_deal_header(selected, queue_position, queue_total)
+        updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
+        if updates:
+            st.session_state["editor_df"] = apply_detail_edit(
+                st.session_state["editor_df"],
+                int(selected["_excel_row"]),
+                updates,
+                comment_date,
+            )
             st.rerun()
 
     changes = workbook_change_set(
