@@ -180,6 +180,68 @@ def init_state(file_hash: str, parsed: dict[str, Any]) -> None:
     st.session_state["selected_row"] = None
 
 
+def stash_uploaded_workbook(uploaded_file: Any) -> None:
+    if uploaded_file is None:
+        return
+    st.session_state["workbook_bytes"] = uploaded_file.getvalue()
+    st.session_state["workbook_name"] = uploaded_file.name
+
+
+def clear_uploaded_workbook() -> None:
+    for key in [
+        "workbook_bytes",
+        "workbook_name",
+        "file_hash",
+        "editor_df",
+        "selected_row",
+    ]:
+        st.session_state.pop(key, None)
+
+
+def get_active_workbook() -> tuple[bytes | None, str | None]:
+    with st.sidebar:
+        st.subheader("Workbook")
+        sidebar_upload = st.file_uploader(
+            "Upload / replace workbook",
+            type=["xlsx"],
+            key="sidebar_workbook_upload",
+        )
+        if sidebar_upload is not None:
+            stash_uploaded_workbook(sidebar_upload)
+
+        if st.session_state.get("workbook_name"):
+            st.caption(f"Current workbook: {st.session_state['workbook_name']}")
+            if st.button("Clear workbook", use_container_width=True):
+                clear_uploaded_workbook()
+                st.rerun()
+
+    if st.session_state.get("workbook_bytes") is None:
+        st.markdown("### Upload workbook")
+        st.write("Choose the latest NPL workbook to open the review workspace.")
+        main_upload = st.file_uploader(
+            "Select workbook",
+            type=["xlsx"],
+            key="main_workbook_upload",
+        )
+        if main_upload is not None:
+            stash_uploaded_workbook(main_upload)
+            st.rerun()
+        return None, None
+
+    with st.expander("Change workbook", expanded=False):
+        st.caption("Use this only when you want to swap to a different weekly file.")
+        replacement = st.file_uploader(
+            "Replace current workbook",
+            type=["xlsx"],
+            key="replace_workbook_upload",
+        )
+        if replacement is not None:
+            stash_uploaded_workbook(replacement)
+            st.rerun()
+
+    return st.session_state.get("workbook_bytes"), st.session_state.get("workbook_name")
+
+
 
 def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str]:
     with st.sidebar:
@@ -644,21 +706,15 @@ def render_presentation_mode(selected: pd.Series, queue_position: int, queue_tot
 
 
 def main() -> None:
-    st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="expanded")
     apply_base_css()
 
     st.title("NPL deal review")
     st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
 
-    with st.sidebar:
-        st.subheader("Workbook")
-        uploaded_file = st.file_uploader("Upload / replace workbook", type=["xlsx"])
-
-    if uploaded_file is None:
-        st.info("Upload the latest workbook from the sidebar to open the review workspace.")
+    file_bytes, workbook_name = get_active_workbook()
+    if file_bytes is None:
         return
-
-    file_bytes = uploaded_file.getvalue()
     file_hash = hashlib.md5(file_bytes).hexdigest()
     parsed = cached_parse_workbook(file_bytes)
     picklists = cached_picklists(parsed["deals_df"])
@@ -761,7 +817,7 @@ def main() -> None:
         else file_bytes
     )
 
-    base_name = uploaded_file.name.rsplit(".", 1)[0]
+    base_name = (workbook_name or "NPL Workbook").rsplit(".", 1)[0]
     download_name = f"{base_name} - AM Updates.xlsx"
     st.download_button(
         "Download updated workbook",
