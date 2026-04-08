@@ -554,8 +554,17 @@ def metric_pct(value: Any) -> str:
 
 
 def metric_date(value: Any) -> str:
-    if value in (None, ""):
+    if value is None or value == "":
         return "-"
+    try:
+        if pd.isna(value):
+            return "-"
+    except Exception:
+        pass
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return "-"
+        return value.strftime("%m/%d/%Y")
     if isinstance(value, datetime):
         return value.strftime("%m/%d/%Y")
     if isinstance(value, date):
