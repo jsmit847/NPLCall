@@ -17,7 +17,6 @@ from workbook_utils import (
     EXPORTABLE_FIELDS,
     GRID_CONTEXT_HEADERS,
     LONG_TEXT_FIELDS,
-    MEETING_STATUS_OPTIONS,
     READONLY_CONTEXT_FIELDS,
     SECTION_MAP,
     apply_detail_edit,
@@ -312,26 +311,45 @@ def apply_base_css() -> None:
 
             .snapshot-grid {
                 display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 0.55rem 0.75rem;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 0.7rem;
                 margin-top: 0.25rem;
             }
             .snapshot-card {
-                border: 1px solid #e5e7eb;
-                border-radius: 12px;
-                padding: 0.6rem 0.75rem;
+                border: 1px solid #dce5f0;
+                border-radius: 14px;
+                padding: 0.7rem 0.8rem;
                 background: #fcfdff;
+                min-height: 100%;
+            }
+            .snapshot-section-title {
+                color: #0f172a;
+                font-size: 0.84rem;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+                margin-bottom: 0.4rem;
+                font-weight: 800;
+            }
+            .snapshot-row {
+                display: grid;
+                grid-template-columns: 10rem 1fr;
+                gap: 0.35rem;
+                padding: 0.16rem 0;
+                border-top: 1px solid #edf2f7;
+            }
+            .snapshot-row:first-child {
+                border-top: none;
+                padding-top: 0;
             }
             .snapshot-label {
                 color: #667085;
-                font-size: 0.72rem;
+                font-size: 0.73rem;
                 text-transform: uppercase;
-                letter-spacing: 0.03em;
-                margin-bottom: 0.18rem;
+                letter-spacing: 0.02em;
                 font-weight: 700;
             }
             .snapshot-value {
-                font-size: 0.98rem;
+                font-size: 0.96rem;
                 line-height: 1.32;
                 font-weight: 700;
                 color: #0f172a;
@@ -645,8 +663,7 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         show_hidden = st.checkbox("Include workbook-hidden rows", value=False)
 
         asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-        selected_ams = st.multiselect("Asset Manager filter", asset_managers)
-        primary_am_sort = st.selectbox("Primary AM sort", ["All asset managers", *asset_managers], index=0)
+        selected_ams = st.multiselect("Filter to asset manager(s)", asset_managers)
         selected_bt = st.multiselect(
             "Bridge / Term",
             sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
@@ -659,7 +676,6 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             "Queue focus",
             [
                 "All deals",
-                "Open only",
                 "Missing current-week comment",
                 "Needs discussion",
                 "Has data flags",
@@ -667,7 +683,7 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         )
         sort_mode = st.selectbox(
             "Sort queue",
-            ["Asset Manager / Deal", "UPB desc", "Flag count desc", "Last comment date desc"],
+            ["Asset Manager -> Deal", "Deal Name", "UPB desc", "Flag count desc", "Last comment date desc"],
             index=0,
         )
         search = st.text_input("Search deal number, name, or location")
@@ -677,8 +693,6 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         filtered_df = filtered_df[~filtered_df["_workbook_hidden"]]
     if selected_ams:
         filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).isin(selected_ams)]
-    if primary_am_sort != "All asset managers":
-        filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).eq(primary_am_sort)]
     if selected_bt:
         filtered_df = filtered_df[filtered_df["Bridge / Term"].astype(str).isin(selected_bt)]
     if selected_segment:
@@ -691,9 +705,7 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             | filtered_df["Location"].astype(str).str.lower().str.contains(needle)
         ]
 
-    if queue_view == "Open only":
-        filtered_df = filtered_df[filtered_df["Review Status"].astype(str).eq("Open")]
-    elif queue_view == "Missing current-week comment":
+    if queue_view == "Missing current-week comment":
         filtered_df = filtered_df[filtered_df["This Week Comment"].fillna("").astype(str).str.strip().eq("")]
     elif queue_view == "Needs discussion":
         filtered_df = filtered_df[filtered_df["Needs Discussion"].fillna(False)]
@@ -701,7 +713,8 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         filtered_df = filtered_df[filtered_df["Flag Count"] > 0]
 
     sort_lookup = {
-        "Asset Manager / Deal": "Asset Manager / Deal",
+        "Asset Manager -> Deal": "Asset Manager / Deal",
+        "Deal Name": "Deal Name",
         "UPB desc": "UPB desc",
         "Flag count desc": "Flag count desc",
         "Last comment date desc": "Last comment date desc",
@@ -849,8 +862,16 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
                 ]
                 if col in related.columns
             ]
+            display_related = related[show_cols].copy()
+            for col in ["Current UPB", "Salesforce As-Is Valuation", "Salesforce ARV"]:
+                if col in display_related.columns:
+                    display_related[col] = display_related[col].apply(metric_currency)
+            if "# Units" in display_related.columns:
+                display_related["# Units"] = display_related["# Units"].apply(lambda v: f"{int(v):,}" if normalize_number(v) is not None else safe_text(v))
+            if "Days Past Due" in display_related.columns:
+                display_related["Days Past Due"] = display_related["Days Past Due"].apply(lambda v: f"{int(v):,}" if normalize_number(v) is not None else safe_text(v))
             with st.expander("Property detail", expanded=False):
-                st.dataframe(related[show_cols], use_container_width=True, hide_index=True)
+                st.dataframe(display_related, use_container_width=True, hide_index=True)
 
 
 
@@ -866,25 +887,55 @@ def editable_field_input(field: str, current_value: str, picklists: dict[str, li
 
 
 def render_snapshot_grid(selected: pd.Series) -> None:
-    snapshot_items = [
-        ("Location", safe_text(selected.get("Location"))),
-        ("Type / Segment", f"{safe_text(selected.get('Type'))} · {safe_text(selected.get('Segment'))}"),
-        ("Financing", safe_text(selected.get("Financing"))),
-        ("UPB / Commitment", f"{metric_currency(selected.get('Current UPB'))} · {metric_currency(selected.get('Loan Commitment'))}"),
-        ("As-Is / ARV", f"{metric_currency(selected.get('Salesforce As-Is Valuation'))} · {metric_currency(selected.get('Salesforce ARV'))}"),
-        ("Maturity / Next Payment", f"{metric_date(selected.get('Maturity Date'))} · {metric_date(selected.get('Next Payment Date'))}"),
-        ("Resolution Path", f"{safe_text(selected.get('Expected Resolution Type'))} → {safe_text(selected.get('Expected Final Resolution'))}"),
-        ("Timing", f"{safe_text(selected.get('Resolution Timing'))} · {safe_text(selected.get('Liquidity Event Timing'))}"),
-        ("Valuation", f"{safe_text(selected.get('Valuation Type'))} · {metric_date(selected.get('Date of Valuation'))}"),
-        ("Offer", f"{safe_text(selected.get('Third Party Offer Amount'))} · {safe_text(selected.get('Third Party Offer Note'))}"),
-        ("Additional NPL Comment", safe_text(selected.get("Addt'l NPL Comment"))),
-        ("Previous Weekly Comment", safe_text(selected.get("Previous Weekly Comment"))),
+    sections = [
+        (
+            "Loan snapshot",
+            [
+                ("Location", safe_text(selected.get("Location"))),
+                ("Type / Segment", f"{safe_text(selected.get('Type'))} · {safe_text(selected.get('Segment'))}"),
+                ("Financing", safe_text(selected.get("Financing"))),
+                ("UPB", metric_currency(selected.get("Current UPB"))),
+                ("Commitment", metric_currency(selected.get("Loan Commitment"))),
+                ("Remaining commitment", metric_currency(selected.get("Remaining Commitment"))),
+                ("Maturity", metric_date(selected.get("Maturity Date"))),
+                ("Next payment", metric_date(selected.get("Next Payment Date"))),
+            ],
+        ),
+        (
+            "Resolution snapshot",
+            [
+                ("Likelihood", safe_text(selected.get("Resolution Likelihood"))),
+                ("Resolution type", safe_text(selected.get("Expected Resolution Type"))),
+                ("Final resolution", safe_text(selected.get("Expected Final Resolution"))),
+                ("Resolution timing", safe_text(selected.get("Resolution Timing"))),
+                ("Liquidity timing", safe_text(selected.get("Liquidity Event Timing"))),
+                ("6/30 performance", safe_text(selected.get("Resolution for 6/30 Performance"))),
+                ("Pref deal", safe_text(selected.get("Pref Deal (Y/N)"))),
+                ("Pref amount", metric_currency(selected.get("Pref Amount ($)"))),
+            ],
+        ),
+        (
+            "Valuation / offer",
+            [
+                ("As-Is value", metric_currency(selected.get("Salesforce As-Is Valuation"))),
+                ("ARV", metric_currency(selected.get("Salesforce ARV"))),
+                ("Valuation type", safe_text(selected.get("Valuation Type"))),
+                ("Valuation date", metric_date(selected.get("Date of Valuation"))),
+                ("As-is appraisal", metric_currency(selected.get("As Is Appraised Value"))),
+                ("As stabilized", metric_currency(selected.get("As Stabilized Value"))),
+                ("Third-party offer", metric_currency(selected.get("Third Party Offer Amount"))),
+                ("Offer note", safe_text(selected.get("Third Party Offer Note"))),
+            ],
+        ),
     ]
     html_parts = ["<div class='snapshot-grid'>"]
-    for label, value in snapshot_items:
-        html_parts.append(
-            f"<div class='snapshot-card'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
-        )
+    for section_title, rows in sections:
+        html_parts.append(f"<div class='snapshot-card'><div class='snapshot-section-title'>{section_title}</div>")
+        for label, value in rows:
+            html_parts.append(
+                f"<div class='snapshot-row'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
+            )
+        html_parts.append("</div>")
     html_parts.append("</div>")
     st.markdown("".join(html_parts), unsafe_allow_html=True)
 
@@ -904,7 +955,7 @@ def render_review_form(
         with top_left:
             st.markdown("<div class='presenter-panel'>", unsafe_allow_html=True)
             st.markdown("<div class='presenter-section-title'>Deal review snapshot</div>", unsafe_allow_html=True)
-            st.caption("Formatted for live review: key context, resolution path, valuation, and prior commentary.")
+            st.caption("Compact meeting brief for ownership, resolution path, timing, and valuation context.")
             render_snapshot_grid(selected)
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -929,12 +980,6 @@ def render_review_form(
         with left:
             st.subheader("Context")
             render_context_column(selected)
-            review_status_options = field_options("Review Status", {"Review Status": MEETING_STATUS_OPTIONS}, str(selected.get("Review Status", "Open")))
-            updates["Review Status"] = st.selectbox(
-                "Meeting status",
-                review_status_options,
-                index=selected_index(review_status_options, str(selected.get("Review Status", "Open"))),
-            )
             updates["Needs Discussion"] = st.checkbox(
                 "Needs discussion",
                 value=bool(selected.get("Needs Discussion", False)),
@@ -992,15 +1037,21 @@ def render_review_form(
             )
 
         st.markdown("<div class='action-bar'>", unsafe_allow_html=True)
-        action_left, action_right = st.columns(2)
+        action_left, action_mid, action_right = st.columns(3)
         with action_left:
-            submitted = st.form_submit_button("Apply deal edits", use_container_width=True)
+            submitted = st.form_submit_button("Save changes", use_container_width=True)
+        with action_mid:
+            submitted_next = st.form_submit_button("Save + next deal", use_container_width=True)
         with action_right:
-            submitted_next = st.form_submit_button("Apply edits + next deal", use_container_width=True)
+            submitted_next_blank = st.form_submit_button("Save + next blank comment", use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
-        if submitted or submitted_next:
+        if submitted or submitted_next or submitted_next_blank:
             if submitted_next:
-                updates["_advance_queue"] = True
+                updates["_advance_mode"] = "next"
+            elif submitted_next_blank:
+                updates["_advance_mode"] = "next_blank"
+            else:
+                updates["_advance_mode"] = "stay"
             return updates
     return None
 
@@ -1025,7 +1076,6 @@ def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None, pickl
             Blank_Current_Comments=("This Week Comment", lambda s: s.fillna("").astype(str).str.strip().eq("").sum()),
             Needs_Discussion=("Needs Discussion", "sum"),
             Flagged=("Flag Count", lambda s: (s > 0).sum()),
-            Open=("Review Status", lambda s: (s.astype(str) == "Open").sum()),
         )
         .reset_index()
         .rename(columns={"Asset Manager": "Asset Manager"})
@@ -1063,7 +1113,6 @@ def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None, pickl
         "Expected Final Resolution",
         "Previous Weekly Comment",
         "This Week Comment",
-        "Review Status",
         "Flag Summary",
     ]
     show_cols = [col for col in queue_cols if col in filtered_df.columns]
@@ -1085,7 +1134,6 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]],
         "Valuation Type",
         "Previous Weekly Comment",
         "This Week Comment",
-        "Review Status",
         "Needs Discussion",
     ]
     available_bulk = [col for col in default_cols if col in filtered_df.columns]
@@ -1102,7 +1150,6 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]],
 
     column_config: dict[str, Any] = {
         "Needs Discussion": st.column_config.CheckboxColumn("Needs Discussion"),
-        "Review Status": st.column_config.SelectboxColumn("Review Status", options=MEETING_STATUS_OPTIONS),
     }
     for field, options in picklists.items():
         if field in editor_view.columns and field not in {"Comment Template"}:
@@ -1173,6 +1220,10 @@ def main() -> None:
                 f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
             )
 
+    flash_message = st.session_state.pop("flash_message", None)
+    if flash_message:
+        st.success(flash_message)
+
     if sorted_df.empty:
         st.warning("No deals match the current filters.")
         return
@@ -1204,18 +1255,39 @@ def main() -> None:
         render_deal_header(selected, queue_position, queue_total)
         updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
         if updates:
-            advance_queue = bool(updates.pop("_advance_queue", False))
+            advance_mode = updates.pop("_advance_mode", "stay")
             st.session_state["editor_df"] = apply_detail_edit(
                 st.session_state["editor_df"],
                 int(selected["_excel_row"]),
                 updates,
                 comment_date,
             )
-            if advance_queue:
-                option_rows = sorted_df["_excel_row"].tolist()
-                current_idx = option_rows.index(int(selected["_excel_row"]))
-                if current_idx < len(option_rows) - 1:
-                    st.session_state["selected_row"] = option_rows[current_idx + 1]
+            option_rows = sorted_df["_excel_row"].tolist()
+            current_idx = option_rows.index(int(selected["_excel_row"]))
+            next_row = None
+            if advance_mode == "next" and current_idx < len(option_rows) - 1:
+                next_row = option_rows[current_idx + 1]
+            elif advance_mode == "next_blank":
+                refreshed_after_save = build_display_view(
+                    base_deals=parsed["deals_df"],
+                    editor_df=st.session_state["editor_df"],
+                    property_summary=parsed["property_summary"],
+                    entry_date=comment_date,
+                    picklists=picklists,
+                )
+                queue_after_save = sort_deals(refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)], "Asset Manager / Deal")
+                blanks = queue_after_save[
+                    queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")
+                ]["_excel_row"].tolist()
+                for row_num in blanks:
+                    if row_num != int(selected["_excel_row"]):
+                        next_row = row_num
+                        break
+                if next_row is None and current_idx < len(option_rows) - 1:
+                    next_row = option_rows[current_idx + 1]
+            if next_row is not None:
+                st.session_state["selected_row"] = next_row
+            st.session_state["flash_message"] = "Deal edits saved."
             st.rerun()
 
     changes = workbook_change_set(
