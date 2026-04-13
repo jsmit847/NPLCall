@@ -1211,6 +1211,8 @@ def format_deal_label(row: pd.Series) -> str:
 
 def sort_deals(df: pd.DataFrame, mode: str) -> pd.DataFrame:
     working = df.copy()
+    if mode == "Workbook file order":
+        return working.sort_values(["_excel_row", "Deal Number"])
     if mode == "UPB desc":
         working["_sort_upb"] = working["Current UPB"].apply(normalize_number)
         return working.sort_values(["_sort_upb", "Asset Manager", "Deal Name"], ascending=[False, True, True]).drop(columns=["_sort_upb"])
