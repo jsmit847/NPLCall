@@ -108,6 +108,9 @@ NUMERIC_OR_TEXT_FIELDS = {
     "Third Party Offer Amount",
 }
 
+COMMENT_STORAGE_FIELD = "Addt'l NPL Comment"
+MANUAL_ENTRY_PICKLIST_FIELDS = {"Expected Resolution Type", "Valuation Type"}
+
 GRID_CONTEXT_HEADERS = [
     "Deal Number",
     "Deal Name",
@@ -575,6 +578,27 @@ def metric_date(value: Any) -> str:
     return str(value)
 
 
+def normalize_money_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text in {"-", "N/A", "NA"}:
+        return text
+    number = normalize_number(text)
+    if number is None:
+        return text
+    return f"${number:,.0f}"
+
+
+def format_edit_value(field: str, value: Any) -> str:
+    text = editable_text(value)
+    if field in NUMERIC_OR_TEXT_FIELDS:
+        return normalize_money_text(text)
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Comment parsing / composition helpers
 # ---------------------------------------------------------------------------
@@ -711,12 +735,14 @@ def make_editor_df(deals_df: pd.DataFrame) -> pd.DataFrame:
     editor_df = deals_df[keep_columns].copy()
 
     for header in export_columns + readonly_columns:
-        editor_df[header] = editor_df[header].apply(editable_text)
+        editor_df[header] = editor_df[header].apply(lambda value, header=header: format_edit_value(header, value))
 
     if "Comments" not in editor_df.columns:
         editor_df["Comments"] = ""
+    if COMMENT_STORAGE_FIELD not in editor_df.columns:
+        editor_df[COMMENT_STORAGE_FIELD] = ""
 
-    editor_df["Comment History"] = editor_df["Comments"].fillna("").astype(str)
+    editor_df["Comment History"] = editor_df[COMMENT_STORAGE_FIELD].fillna("").astype(str)
     editor_df["Previous Weekly Comment"] = editor_df["Comment History"].apply(latest_history_comment)
     editor_df["This Week Comment"] = ""
     editor_df["Comments Preview"] = editor_df["Comment History"]
@@ -736,6 +762,11 @@ def normalize_for_compare(value: Any) -> str:
 
 def refresh_editor_derived_fields(editor_df: pd.DataFrame, entry_date: date | datetime | None) -> pd.DataFrame:
     refreshed = editor_df.copy()
+    for field in NUMERIC_OR_TEXT_FIELDS:
+        if field in refreshed.columns:
+            refreshed[field] = refreshed[field].apply(normalize_money_text)
+    if COMMENT_STORAGE_FIELD in refreshed.columns:
+        refreshed["Comment History"] = refreshed[COMMENT_STORAGE_FIELD].fillna("").astype(str)
     refreshed["Previous Weekly Comment"] = refreshed["Comment History"].fillna("").astype(str).apply(latest_history_comment)
     refreshed["Comments Preview"] = refreshed.apply(
         lambda row: compose_comment_value(
@@ -805,12 +836,15 @@ def build_picklists(deals_df: pd.DataFrame) -> dict[str, list[str]]:
         "Third Party Offer Note": ["Yes", "No", "Y", "N", "N/A", "NA"],
         "Valuation Type": [
             "Appraisal",
-            "Drive-By BPO",
-            "Drive By BPO",
-            "Interior BPO",
-            "Ext-BPO",
-            "BOV",
             "Exterior Appraisal",
+            "Interior Appraisal",
+            "Drive-By BPO",
+            "Exterior BPO",
+            "Interior BPO",
+            "Broker Opinion of Value (BOV)",
+            "Desktop Valuation",
+            "AVM",
+            "Updated Appraisal",
             "N/A",
         ],
         "Expected Final Resolution": [
@@ -932,12 +966,14 @@ def workbook_change_set(
             continue
         current = row_lookup.loc[excel_row]
         for header in EXPORTABLE_FIELDS:
-            if header == "Comments":
+            if header == COMMENT_STORAGE_FIELD:
                 current_text = compose_comment_value(
-                    original.get("Comments", ""),
+                    original.get(COMMENT_STORAGE_FIELD, ""),
                     current.get("This Week Comment", ""),
                     entry_date,
                 )
+            elif header == "Comments":
+                current_text = normalize_for_compare(original.get("Comments", ""))
             else:
                 if header not in current.index:
                     continue
