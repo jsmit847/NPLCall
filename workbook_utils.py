@@ -721,7 +721,6 @@ def make_editor_df(deals_df: pd.DataFrame) -> pd.DataFrame:
     editor_df["This Week Comment"] = ""
     editor_df["Comments Preview"] = editor_df["Comment History"]
     editor_df["Last Comment Date"] = editor_df["Comment History"].apply(last_history_date)
-    editor_df["Review Status"] = "Open"
     editor_df["Needs Discussion"] = False
 
     return editor_df
@@ -847,7 +846,6 @@ def build_picklists(deals_df: pd.DataFrame) -> dict[str, list[str]]:
     for field, preferred_options in preferred.items():
         if field in deals_df.columns:
             picklists[field] = merge_options(preferred_options, unique_nonblank(deals_df[field]))
-    picklists["Review Status"] = MEETING_STATUS_OPTIONS
     picklists["Comment Template"] = COMMENT_TEMPLATE_OPTIONS
     return picklists
 
@@ -905,7 +903,6 @@ def build_display_view(
             "This Week Comment",
             "Comments Preview",
             "Last Comment Date",
-            "Review Status",
             "Needs Discussion",
         ]
         if col in editor_lookup.columns
@@ -1185,4 +1182,7 @@ def sort_deals(df: pd.DataFrame, mode: str) -> pd.DataFrame:
         return working.sort_values(["Flag Count", "Asset Manager", "Deal Name"], ascending=[False, True, True])
     if mode == "Last comment date desc":
         return working.sort_values(["Last Comment Date", "Asset Manager", "Deal Name"], ascending=[False, True, True])
+    if mode == "Deal Name":
+        return working.sort_values(["Deal Name", "Asset Manager", "Deal Number"])
     return working.sort_values(["Asset Manager", "Deal Name", "Deal Number"])
+
