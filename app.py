@@ -19,6 +19,9 @@ from workbook_utils import (
     LONG_TEXT_FIELDS,
     READONLY_CONTEXT_FIELDS,
     SECTION_MAP,
+    COMMENT_STORAGE_FIELD,
+    MANUAL_ENTRY_PICKLIST_FIELDS,
+    NUMERIC_OR_TEXT_FIELDS,
     apply_detail_edit,
     build_display_view,
     build_picklists,
@@ -31,6 +34,7 @@ from workbook_utils import (
     metric_currency,
     metric_date,
     metric_pct,
+    normalize_money_text,
     normalize_number,
     parse_deal_workbook,
     refresh_editor_derived_fields,
@@ -216,8 +220,8 @@ def apply_base_css() -> None:
             h1 {font-size: 1.35rem !important; margin-bottom: 0.1rem !important;}
             h2 {font-size: 1.05rem !important; margin-top: 0.35rem !important;}
             h3 {font-size: 0.95rem !important; margin-top: 0.25rem !important;}
-            div[data-testid="stMetricValue"] {font-size: 1.0rem !important;}
-            div[data-testid="stMetricLabel"] {font-size: 0.78rem !important;}
+            div[data-testid="stMetricValue"] {font-size: 1.25rem !important; font-weight: 900 !important;}
+            div[data-testid="stMetricLabel"] {font-size: 0.86rem !important; font-weight: 800 !important;}
             .deal-header {
                 border: 1px solid #d7dbe2;
                 border-radius: 12px;
@@ -273,9 +277,40 @@ def apply_base_css() -> None:
             .presenter-panel {
                 border: 1px solid #dfe6ef;
                 border-radius: 12px;
-                padding: 0.7rem 0.85rem;
+                padding: 0.8rem 0.95rem;
                 background: white;
                 height: 100%;
+            }
+            .kpi-grid {
+                display: grid;
+                grid-template-columns: repeat(7, minmax(110px, 1fr));
+                gap: 0.45rem;
+                margin-bottom: 0.45rem;
+            }
+            .kpi-box {
+                border: 1px solid #dfe6ef;
+                border-radius: 12px;
+                padding: 0.65rem 0.7rem;
+                background: white;
+            }
+            .kpi-box .label {
+                color: #667085;
+                font-size: 0.76rem;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+                font-weight: 800;
+            }
+            .kpi-box .value {
+                margin-top: 0.18rem;
+                font-size: 1.28rem;
+                font-weight: 900;
+                line-height: 1.05;
+            }
+            .kpi-box .subvalue {
+                margin-top: 0.14rem;
+                color: #475467;
+                font-size: 0.82rem;
+                font-weight: 700;
             }
             .kpi-comment {
                 border: 1px solid #e5e7eb;
@@ -663,7 +698,13 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         show_hidden = st.checkbox("Include workbook-hidden rows", value=False)
 
         asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-        selected_ams = st.multiselect("Filter to asset manager(s)", asset_managers)
+        am_mode = st.radio("Asset manager scope", ["All asset managers", "Single asset manager", "Selected asset managers"], index=0)
+        selected_am = None
+        selected_ams: list[str] = []
+        if am_mode == "Single asset manager":
+            selected_am = st.selectbox("Choose asset manager", ["All"] + asset_managers, index=0)
+        elif am_mode == "Selected asset managers":
+            selected_ams = st.multiselect("Filter to asset manager(s)", asset_managers)
         selected_bt = st.multiselect(
             "Bridge / Term",
             sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
@@ -691,7 +732,9 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
     filtered_df = display_df.copy()
     if not show_hidden:
         filtered_df = filtered_df[~filtered_df["_workbook_hidden"]]
-    if selected_ams:
+    if selected_am and selected_am != "All":
+        filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).eq(selected_am)]
+    elif selected_ams:
         filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).isin(selected_ams)]
     if selected_bt:
         filtered_df = filtered_df[filtered_df["Bridge / Term"].astype(str).isin(selected_bt)]
@@ -776,14 +819,24 @@ def render_deal_header(selected: pd.Series, queue_position: int, queue_total: in
 
 
 def render_metric_strip(selected: pd.Series) -> None:
-    cols = st.columns(7)
-    cols[0].metric("UPB", metric_currency(selected.get("Current UPB")))
-    cols[1].metric("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")))
-    cols[2].metric("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")))
-    cols[3].metric("ARV", metric_currency(selected.get("Salesforce ARV")))
-    cols[4].metric("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")))
-    cols[5].metric("DQ", safe_text(selected.get("Current DQ Status")))
-    cols[6].metric("Last comment date", metric_date(selected.get("Last Comment Date")))
+    items = [
+        ("UPB", metric_currency(selected.get("Current UPB")), ""),
+        ("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")), ""),
+        ("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")), ""),
+        ("ARV", metric_currency(selected.get("Salesforce ARV")), ""),
+        ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")), ""),
+        ("DQ", safe_text(selected.get("Current DQ Status")), ""),
+        ("Last comment date", metric_date(selected.get("Last Comment Date")), ""),
+    ]
+    html = ["<div class='kpi-grid'>"]
+    for label, value, subvalue in items:
+        html.append(
+            f"<div class='kpi-box'><div class='label'>{label}</div><div class='value'>{value}</div>"
+            + (f"<div class='subvalue'>{subvalue}</div>" if subvalue else "")
+            + "</div>"
+        )
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
     st.markdown(
         f"<div class='kpi-comment'><div class='label'>Previous weekly comment</div><div class='value'>{safe_text(selected.get('Previous Weekly Comment'))}</div></div>",
         unsafe_allow_html=True,
@@ -876,13 +929,28 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
 
 
 def editable_field_input(field: str, current_value: str, picklists: dict[str, list[str]]) -> Any:
+    if field in MANUAL_ENTRY_PICKLIST_FIELDS and field in picklists:
+        options = field_options(field, picklists, current_value)
+        custom_option = "Type custom value"
+        select_options = options + ([custom_option] if custom_option not in options else [])
+        default_index = selected_index(select_options, current_value if current_value in select_options else custom_option)
+        selected_option = st.selectbox(f"{field} options", select_options, index=default_index, key=f"{field}_select_{abs(hash((field, current_value)))}")
+        if selected_option == custom_option:
+            typed_value = st.text_input(field, current_value, key=f"{field}_custom_{abs(hash((field, current_value, 'custom')))}")
+            return typed_value
+        return selected_option
     if field in picklists:
         options = field_options(field, picklists, current_value)
         return st.selectbox(field, options, index=selected_index(options, current_value))
+    if field in NUMERIC_OR_TEXT_FIELDS:
+        typed_value = st.text_input(field, normalize_money_text(current_value), placeholder="$0", help="Dollar values are normalized to whole dollars on save.")
+        preview = normalize_money_text(typed_value)
+        if preview and preview != typed_value.strip():
+            st.caption(f"Formatted value: {preview}")
+        return typed_value
     if field in LONG_TEXT_FIELDS or len(current_value) > 80:
         return st.text_area(field, current_value, height=90)
     return st.text_input(field, current_value)
-
 
 
 
@@ -899,10 +967,12 @@ def render_snapshot_grid(selected: pd.Series) -> None:
                 ("Remaining commitment", metric_currency(selected.get("Remaining Commitment"))),
                 ("Maturity", metric_date(selected.get("Maturity Date"))),
                 ("Next payment", metric_date(selected.get("Next Payment Date"))),
+                ("Units", safe_text(selected.get("Number Of Units"))),
+                ("Property count", safe_text(selected.get("Property Count"))),
             ],
         ),
         (
-            "Resolution snapshot",
+            "Resolution + valuation / offer",
             [
                 ("Likelihood", safe_text(selected.get("Resolution Likelihood"))),
                 ("Resolution type", safe_text(selected.get("Expected Resolution Type"))),
@@ -910,15 +980,6 @@ def render_snapshot_grid(selected: pd.Series) -> None:
                 ("Resolution timing", safe_text(selected.get("Resolution Timing"))),
                 ("Liquidity timing", safe_text(selected.get("Liquidity Event Timing"))),
                 ("6/30 performance", safe_text(selected.get("Resolution for 6/30 Performance"))),
-                ("Pref deal", safe_text(selected.get("Pref Deal (Y/N)"))),
-                ("Pref amount", metric_currency(selected.get("Pref Amount ($)"))),
-            ],
-        ),
-        (
-            "Valuation / offer",
-            [
-                ("As-Is value", metric_currency(selected.get("Salesforce As-Is Valuation"))),
-                ("ARV", metric_currency(selected.get("Salesforce ARV"))),
                 ("Valuation type", safe_text(selected.get("Valuation Type"))),
                 ("Valuation date", metric_date(selected.get("Date of Valuation"))),
                 ("As-is appraisal", metric_currency(selected.get("As Is Appraised Value"))),
@@ -949,31 +1010,14 @@ def render_review_form(
     render_metric_strip(selected)
     render_status_chips(selected)
     with st.form(f"detail_form_{int(selected['_excel_row'])}"):
-        top_left, top_right = st.columns([1.7, 1.15])
         updates: dict[str, Any] = {}
 
-        with top_left:
-            st.markdown("<div class='presenter-panel'>", unsafe_allow_html=True)
-            st.markdown("<div class='presenter-section-title'>Deal review snapshot</div>", unsafe_allow_html=True)
-            st.caption("Compact meeting brief for ownership, resolution path, timing, and valuation context.")
-            render_snapshot_grid(selected)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with top_right:
-            st.markdown("<div class='presenter-panel'>", unsafe_allow_html=True)
-            st.markdown("<div class='presenter-section-title'>Valuation & offer snapshot</div>", unsafe_allow_html=True)
-            valuation_lines = [
-                f"Valuation Type: {safe_text(selected.get('Valuation Type'))}",
-                f"As-Is Value: {metric_currency(selected.get('As Is Appraised Value'))}",
-                f"As Stabilized: {metric_currency(selected.get('As Stabilized Value'))}",
-                f"Valuation Date: {metric_date(selected.get('Date of Valuation'))}",
-                f"Finalized?: {safe_text(selected.get('Is Appraisal Finalized? (Y/N)'))}",
-                f"Third Party Offer: {safe_text(selected.get('Third Party Offer Amount'))}",
-                f"Offer Note: {safe_text(selected.get('Third Party Offer Note'))}",
-            ]
-            st.markdown(f"<div class='presenter-text'>{'<br>'.join(valuation_lines)}</div>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-            render_property_summary(selected, properties_df)
+        st.markdown("<div class='presenter-panel'>", unsafe_allow_html=True)
+        st.markdown("<div class='presenter-section-title'>Deal review snapshot</div>", unsafe_allow_html=True)
+        st.caption("Compact meeting brief for ownership, resolution path, timing, and valuation / offer context.")
+        render_snapshot_grid(selected)
+        st.markdown("</div>", unsafe_allow_html=True)
+        render_property_summary(selected, properties_df)
 
         left, middle, right = st.columns([0.95, 1.25, 1.3])
 
@@ -988,7 +1032,7 @@ def render_review_form(
         with middle:
             st.subheader("Manual updates")
             for section_title, fields in SECTION_MAP.items():
-                present_fields = [field for field in fields if field in selected.index]
+                present_fields = [field for field in fields if field in selected.index and field != COMMENT_STORAGE_FIELD]
                 if not present_fields:
                     continue
                 st.markdown(f"**{section_title}**")
@@ -998,7 +1042,7 @@ def render_review_form(
         with right:
             st.subheader("Weekly comments")
             st.text_area(
-                "Previous weekly comment",
+                "Previous weekly comment (from Addt'l NPL Comment)",
                 editable_text(selected.get("Previous Weekly Comment")),
                 disabled=True,
                 height=90,
@@ -1024,13 +1068,13 @@ def render_review_form(
                 "This week comment",
                 editable_text(selected.get("This Week Comment")),
                 height=150,
-                help="This will be prepended to the existing Comments history on export.",
+                help="This will be prepended to the existing Addt'l NPL Comment history on save/export.",
             )
             built_comment = build_weekly_comment_text(current_week, comment_template)
             updates["This Week Comment"] = built_comment
-            st.caption(f"Export preview will prepend: {format_comment_entry_date(comment_date)} - {built_comment}" if built_comment else "No current-week comment entered yet.")
+            st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}" if built_comment else "No current-week comment entered yet.")
             st.text_area(
-                "Comments export preview",
+                "Addt'l NPL Comment preview",
                 editable_text(selected.get("Comments Preview")) if not built_comment else f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip(),
                 disabled=True,
                 height=170,
