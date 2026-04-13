@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from datetime import date
 from typing import Any
 from urllib.parse import quote
@@ -160,7 +161,7 @@ def ensure_sharepoint_login(config: dict[str, str]) -> str | None:
     )
     st.session_state["ms_graph_auth_flow"] = flow
     st.info("Sign in with Microsoft to browse SharePoint files.")
-    st.link_button("Sign in with Microsoft", flow["auth_uri"], use_container_width=True)
+    st.link_button("Sign in with Microsoft", flow["auth_uri"], width="stretch")
     return None
 
 
@@ -503,7 +504,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
     account_name = (token_info.get("id_token_claims") or {}).get("name") or (token_info.get("id_token_claims") or {}).get("preferred_username")
     if account_name:
         st.caption(f"Signed in as {account_name}")
-    if st.button("Sign out of Microsoft", use_container_width=True):
+    if st.button("Sign out of Microsoft", width="stretch"):
         clear_sharepoint_session()
         clear_uploaded_workbook()
         st.rerun()
@@ -572,7 +573,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
 
     nav_cols = st.columns([1, 1])
     with nav_cols[0]:
-        if st.button("Up one folder", use_container_width=True, disabled=not current_folder_id and not folder_stack):
+        if st.button("Up one folder", width="stretch", disabled=not current_folder_id and not folder_stack):
             if folder_stack:
                 previous = folder_stack.pop()
                 st.session_state["sharepoint_current_folder_id"] = previous["id"]
@@ -583,7 +584,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
             st.session_state["sharepoint_folder_stack"] = folder_stack
             st.rerun()
     with nav_cols[1]:
-        if st.button("Go to library root", use_container_width=True):
+        if st.button("Go to library root", width="stretch"):
             st.session_state["sharepoint_current_folder_id"] = None
             st.session_state["sharepoint_current_folder_name"] = "Root"
             st.session_state["sharepoint_folder_stack"] = []
@@ -625,7 +626,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
     selected_label = st.selectbox("Workbook", file_labels, key=f"file_pick_{selected_drive_id}_{current_folder_id or 'root'}")
     selected_item = excel_files[file_labels.index(selected_label)]
 
-    if st.button("Open selected workbook", use_container_width=True):
+    if st.button("Open selected workbook", width="stretch"):
         try:
             file_bytes = cached_download(access_token, selected_drive_id, selected_item["id"])
         except Exception as exc:
@@ -655,7 +656,7 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
         if st.session_state.get("workbook_name"):
             source_label = st.session_state.get("workbook_source", source_mode)
             st.caption(f"Current workbook: {st.session_state['workbook_name']} ({source_label})")
-            if st.button("Clear workbook", use_container_width=True):
+            if st.button("Clear workbook", width="stretch"):
                 clear_uploaded_workbook()
                 st.rerun()
 
@@ -704,7 +705,7 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
     return st.session_state.get("workbook_bytes"), st.session_state.get("workbook_name")
 
 
-def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str]:
+def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
     with st.sidebar:
         st.header("Review filters")
         workspace_mode = st.radio(
@@ -717,8 +718,33 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         show_hidden = st.checkbox("Include workbook-hidden rows", value=False)
 
         asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-        selected_am = st.selectbox("Deals for asset manager", ["All asset managers"] + asset_managers, index=0)
+        am_filter_mode = st.radio(
+            "Deal selection mode",
+            ["All deals", "Single asset manager", "Multiple asset managers"],
+            index=0,
+            help="Choose whether to review the full file, one AM's queue, or a selected set of AMs.",
+        )
+        selected_am = "All asset managers"
         selected_ams: list[str] = []
+        if am_filter_mode == "Single asset manager":
+            selected_am = st.selectbox(
+                "Show deals for asset manager",
+                asset_managers,
+                index=0 if asset_managers else None,
+            ) if asset_managers else "All asset managers"
+        elif am_filter_mode == "Multiple asset managers":
+            selected_ams = st.multiselect(
+                "Show deals for selected asset managers",
+                asset_managers,
+                default=[],
+            )
+
+        review_order = st.radio(
+            "Presentation order",
+            ["Workbook file order", "Asset Manager order"],
+            index=0,
+            help="Workbook file order follows the uploaded sheet. Asset Manager order groups deals by AM before stepping through the queue.",
+        )
         selected_bt = st.multiselect(
             "Bridge / Term",
             sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
@@ -738,8 +764,9 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         )
         sort_mode = st.selectbox(
             "Sort queue",
-            ["Asset Manager -> Deal", "Deal Name", "UPB desc", "Flag count desc", "Last comment date desc"],
-            index=0,
+            ["Workbook file order", "Asset Manager -> Deal", "Deal Name", "UPB desc", "Flag count desc", "Last comment date desc"],
+            index=0 if review_order == "Workbook file order" else 1,
+            help="Use Workbook file order to step through exactly how the uploaded sheet is arranged, or switch to Asset Manager order to review by AM.",
         )
         search = st.text_input("Search deal number, name, or location")
 
@@ -770,14 +797,20 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         filtered_df = filtered_df[filtered_df["Flag Count"] > 0]
 
     sort_lookup = {
+        "Workbook file order": "Workbook file order",
         "Asset Manager -> Deal": "Asset Manager / Deal",
         "Deal Name": "Deal Name",
         "UPB desc": "UPB desc",
         "Flag count desc": "Flag count desc",
         "Last comment date desc": "Last comment date desc",
     }
-    sorted_df = sort_deals(filtered_df, sort_lookup[sort_mode]).reset_index(drop=True)
-    return sorted_df, comment_date, queue_view, workspace_mode
+    selected_sort = sort_mode
+    if review_order == "Workbook file order" and sort_mode == "Asset Manager -> Deal":
+        selected_sort = "Workbook file order"
+    elif review_order == "Asset Manager order" and sort_mode == "Workbook file order":
+        selected_sort = "Asset Manager -> Deal"
+    sorted_df = sort_deals(filtered_df, sort_lookup[selected_sort]).reset_index(drop=True)
+    return sorted_df, comment_date, queue_view, workspace_mode, selected_sort
 
 
 
@@ -793,11 +826,11 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
 
     nav1, nav2, nav3 = st.columns([1, 1, 5])
     with nav1:
-        if st.button("Previous", disabled=current_idx == 0, use_container_width=True):
+        if st.button("Previous", disabled=current_idx == 0, width="stretch"):
             st.session_state["selected_row"] = option_rows[current_idx - 1]
             st.rerun()
     with nav2:
-        if st.button("Next", disabled=current_idx == len(option_rows) - 1, use_container_width=True):
+        if st.button("Next", disabled=current_idx == len(option_rows) - 1, width="stretch"):
             st.session_state["selected_row"] = option_rows[current_idx + 1]
             st.rerun()
     with nav3:
@@ -942,7 +975,7 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
             if "Days Past Due" in display_related.columns:
                 display_related["Days Past Due"] = display_related["Days Past Due"].apply(lambda v: f"{int(v):,}" if normalize_number(v) is not None else safe_text(v))
             with st.expander("Property detail", expanded=False):
-                st.dataframe(display_related, use_container_width=True, hide_index=True)
+                st.dataframe(display_related, width="stretch", hide_index=True)
 
 
 
@@ -1100,11 +1133,11 @@ def render_review_form(
         st.markdown("<div class='action-bar'>", unsafe_allow_html=True)
         action_left, action_mid, action_right = st.columns(3)
         with action_left:
-            submitted = st.form_submit_button("Apply deal edits", use_container_width=True)
+            submitted = st.form_submit_button("Apply deal edits", width="stretch")
         with action_mid:
-            submitted_next = st.form_submit_button("Apply edits + next deal", use_container_width=True)
+            submitted_next = st.form_submit_button("Apply edits + next deal", width="stretch")
         with action_right:
-            submitted_next_blank = st.form_submit_button("Apply edits + next blank comment", use_container_width=True)
+            submitted_next_blank = st.form_submit_button("Apply edits + next blank comment", width="stretch")
         st.markdown("</div>", unsafe_allow_html=True)
         if submitted or submitted_next or submitted_next_blank:
             if submitted_next:
@@ -1148,7 +1181,7 @@ def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None, pickl
     })
 
     st.markdown("**AM workload**")
-    st.dataframe(am_summary, use_container_width=True, hide_index=True)
+    st.dataframe(am_summary, width="stretch", hide_index=True)
 
     qos_findings = []
     valuation_values = set(filtered_df.get("Valuation Type", pd.Series(dtype=str)).dropna().astype(str))
@@ -1177,7 +1210,7 @@ def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None, pickl
         "Flag Summary",
     ]
     show_cols = [col for col in queue_cols if col in filtered_df.columns]
-    st.dataframe(filtered_df[show_cols], use_container_width=True, hide_index=True)
+    st.dataframe(filtered_df[show_cols], width="stretch", hide_index=True)
 
 
 
@@ -1222,7 +1255,7 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]],
 
     edited = st.data_editor(
         editor_view,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         disabled=disabled_columns,
         num_rows="fixed",
@@ -1230,7 +1263,7 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]],
         key="bulk_editor_v3",
     )
 
-    if st.button("Apply bulk grid changes", use_container_width=True):
+    if st.button("Apply bulk grid changes", width="stretch"):
         return edited
     return None
 
@@ -1270,7 +1303,7 @@ def main() -> None:
     visible_count = int((~display_df["_workbook_hidden"]).sum())
     hidden_count = int(display_df["_workbook_hidden"].sum())
 
-    sorted_df, comment_date, queue_view, workspace_mode = apply_filters(display_df)
+    sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df)
     st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
 
     if workspace_mode != "Review workspace":
@@ -1288,6 +1321,10 @@ def main() -> None:
     if sorted_df.empty:
         st.warning("No deals match the current filters.")
         return
+
+    if workspace_mode == "Review workspace":
+        order_label = "workbook file order" if selected_sort == "Workbook file order" else "asset manager order"
+        st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
 
     render_queue_navigation(sorted_df)
 
@@ -1336,7 +1373,8 @@ def main() -> None:
                     entry_date=comment_date,
                     picklists=picklists,
                 )
-                queue_after_save = sort_deals(refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)], "Asset Manager / Deal")
+                next_blank_sort = "Workbook file order" if selected_sort == "Workbook file order" else "Asset Manager / Deal"
+                queue_after_save = sort_deals(refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)], next_blank_sort)
                 blanks = queue_after_save[
                     queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")
                 ]["_excel_row"].tolist()
@@ -1362,10 +1400,13 @@ def main() -> None:
     summary_col, action_col = st.columns([2, 1])
     with summary_col:
         st.write(f"Pending edits in the app view: **{len(changes)} cells across {changed_deals} deal(s)**")
+        summary_parts = []
         if queue_view != "All deals":
-            st.caption(f"Queue focus currently applied: {queue_view}")
+            summary_parts.append(f"queue focus: {queue_view}")
+        summary_parts.append(f"order: {selected_sort.lower()}")
+        st.caption(" · ".join(summary_parts))
     with action_col:
-        if st.button("Reset all app edits", use_container_width=True):
+        if st.button("Reset all app edits", width="stretch"):
             st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
             st.rerun()
 
@@ -1388,7 +1429,7 @@ def main() -> None:
         data=updated_bytes,
         file_name=download_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width="stretch",
     )
 
 
