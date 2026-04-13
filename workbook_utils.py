@@ -1116,34 +1116,55 @@ def patch_content_types_xml(content_xml: bytes) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+
 def build_updated_workbook(
     file_bytes: bytes,
     sheet_path: str,
     changes: dict[tuple[int, str], str],
     cell_meta: dict[tuple[int, str], dict[str, Any]],
+    sheet_name: str | None = None,
 ) -> bytes:
-    source = io.BytesIO(file_bytes)
-    output = io.BytesIO()
+    """
+    Safe workbook writer that round-trips through openpyxl instead of patching raw XML.
+    This is more tolerant of SharePoint/Excel-generated workbooks and avoids corruption on download.
+    """
+    wb = load_workbook(io.BytesIO(file_bytes))
+    target_ws = None
 
-    with ZipFile(source, "r") as zin, ZipFile(output, "w", compression=ZIP_DEFLATED) as zout:
-        for info in zin.infolist():
-            data = zin.read(info.filename)
-            if info.filename == sheet_path:
-                data = patch_sheet_xml(data, changes, cell_meta)
-            elif info.filename == "xl/workbook.xml":
-                data = patch_workbook_xml(data)
-            elif info.filename == "xl/_rels/workbook.xml.rels":
-                data = patch_workbook_rels_xml(data)
-            elif info.filename == "[Content_Types].xml":
-                data = patch_content_types_xml(data)
-            elif info.filename == "xl/calcChain.xml":
+    if sheet_name:
+        for ws in wb.worksheets:
+            if ws.title == sheet_name:
+                target_ws = ws
+                break
+
+    # Fall back to the first worksheet that contains known coordinates if the XML sheet path
+    # does not map cleanly back to a visible worksheet title.
+    if target_ws is None and cell_meta:
+        coord_sample = next(iter(cell_meta.values())).get("coord")
+        for ws in wb.worksheets:
+            try:
+                _ = ws[coord_sample]
+                target_ws = ws
+                break
+            except Exception:
                 continue
 
-            new_info = info
-            new_info.compress_type = ZIP_DEFLATED
-            zout.writestr(new_info, data)
+    if target_ws is None:
+        raise ValueError(f"Could not map worksheet path {sheet_path} back to a workbook sheet.")
 
+    for (excel_row, header), text_value in changes.items():
+        meta = cell_meta.get((excel_row, header))
+        if not meta:
+            continue
+        coord = meta.get("coord")
+        if not coord:
+            continue
+        target_ws[coord].value = coerce_cell_value(text_value, header)
+
+    output = io.BytesIO()
+    wb.save(output)
     return output.getvalue()
+
 
 
 # ---------------------------------------------------------------------------
