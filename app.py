@@ -425,6 +425,14 @@ def apply_base_css() -> None:
             }
             .stTabs [data-baseweb="tab-list"] {gap: 0.25rem;}
             .stTabs [data-baseweb="tab"] {padding-top: 0.35rem; padding-bottom: 0.35rem;}
+            .side-panel {
+                border: 1px solid #dfe6ef;
+                border-radius: 14px;
+                padding: 0.9rem 0.9rem 0.7rem 0.9rem;
+                background: #fbfcfe;
+                position: sticky;
+                top: 0.75rem;
+            }
             header, footer {visibility: hidden;}
         </style>
         """,
@@ -712,10 +720,11 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 
 
 
-def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
-    with st.sidebar:
-        st.header("Review controls")
-        st.caption("Choose the presentation order and AM scope here before stepping through deals.")
+
+def apply_filters(display_df: pd.DataFrame, controls_container) -> tuple[pd.DataFrame, date, str, str, str]:
+    with controls_container:
+        st.markdown("### Review controls")
+        st.caption("Choose presentation order and deal scope here.")
 
         workspace_mode = st.radio(
             "Workspace",
@@ -737,22 +746,20 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
 
         asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
 
-        st.markdown("**Presentation order**")
-        presentation_order = st.select_slider(
+        presentation_order = st.selectbox(
             "Presentation order",
-            options=["Workbook file order", "Asset Manager order"],
-            value=st.session_state.get("presentation_order_slider", "Workbook file order"),
-            key="presentation_order_slider",
-            help="Slide this to choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
+            ["Workbook file order", "Asset Manager order"],
+            index=0,
+            key="presentation_order_select",
+            help="Choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
         )
 
-        st.markdown("**Asset Manager scope**")
-        am_scope = st.select_slider(
-            "Included deals",
-            options=["All asset managers"] + asset_managers if asset_managers else ["All asset managers"],
-            value=st.session_state.get("am_scope_slider", "All asset managers") if st.session_state.get("am_scope_slider") in (["All asset managers"] + asset_managers if asset_managers else ["All asset managers"]) else "All asset managers",
-            key="am_scope_slider",
-            help="Slide to a specific Asset Manager to only review that AM's deals.",
+        am_scope = st.selectbox(
+            "Show deals for",
+            ["All asset managers"] + asset_managers if asset_managers else ["All asset managers"],
+            index=0,
+            key="am_scope_select",
+            help="Pick one Asset Manager here to review only that AM's deals.",
         )
 
         selected_bt = st.multiselect(
@@ -786,7 +793,6 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             ],
             index=0,
             key="secondary_sort_select",
-            help="Leave this on presentation order only unless you want a different secondary sort.",
         )
         search = st.text_input(
             "Search deal number, name, or location",
@@ -1313,135 +1319,141 @@ def main() -> None:
     visible_count = int((~display_df["_workbook_hidden"]).sum())
     hidden_count = int(display_df["_workbook_hidden"].sum())
 
-    sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df)
+    page_left, page_right = st.columns([1.05, 5.0], gap="large")
+    with page_left:
+        st.markdown('<div class="side-panel">', unsafe_allow_html=True)
+        sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df, st.container())
+        st.markdown('</div>', unsafe_allow_html=True)
     st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
 
-    if workspace_mode != "Review workspace":
-        st.title("NPL deal review")
-        st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
-        with st.expander("Workbook details", expanded=False):
-            st.caption(
-                f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
-            )
+    with page_right:
 
-    flash_message = st.session_state.pop("flash_message", None)
-    if flash_message:
-        st.success(flash_message)
-
-    if sorted_df.empty:
-        st.warning("No deals match the current filters.")
-        return
-
-    if workspace_mode == "Review workspace":
-        order_label = "workbook file order" if selected_sort == "Workbook file order" else selected_sort.lower()
-        st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
-
-    render_queue_navigation(sorted_df)
-
-    selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
-    queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
-    queue_total = len(sorted_df)
-    if workspace_mode == "Overview":
-        render_overview(sorted_df, parsed.get("snapshot_label"), picklists)
-    elif workspace_mode == "Bulk update":
-        edited_subset = render_bulk_edit(sorted_df, picklists, comment_date)
-        if edited_subset is not None:
-            full_editor = st.session_state["editor_df"].set_index("_excel_row")
-            edited_lookup = edited_subset.set_index("_excel_row")
-            for row_num in edited_lookup.index:
-                if row_num not in full_editor.index:
-                    continue
-                for header in edited_lookup.columns:
-                    if header in {"Comment History", "Comments Preview", "Previous Weekly Comment", "Last Comment Date"}:
-                        continue
-                    if header in full_editor.columns:
-                        full_editor.loc[row_num, header] = edited_lookup.loc[row_num, header]
-            st.session_state["editor_df"] = refresh_editor_derived_fields(full_editor.reset_index(), comment_date)
-            st.success("Bulk grid changes applied in the app view.")
-            st.rerun()
-    else:
-        render_deal_header(selected, queue_position, queue_total)
-        updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
-        if updates:
-            advance_mode = updates.pop("_advance_mode", "stay")
-            st.session_state["editor_df"] = apply_detail_edit(
-                st.session_state["editor_df"],
-                int(selected["_excel_row"]),
-                updates,
-                comment_date,
-            )
-            option_rows = sorted_df["_excel_row"].tolist()
-            current_idx = option_rows.index(int(selected["_excel_row"]))
-            next_row = None
-            if advance_mode == "next" and current_idx < len(option_rows) - 1:
-                next_row = option_rows[current_idx + 1]
-            elif advance_mode == "next_blank":
-                refreshed_after_save = build_display_view(
-                    base_deals=parsed["deals_df"],
-                    editor_df=st.session_state["editor_df"],
-                    property_summary=parsed["property_summary"],
-                    entry_date=comment_date,
-                    picklists=picklists,
+        if workspace_mode != "Review workspace":
+            st.title("NPL deal review")
+            st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
+            with st.expander("Workbook details", expanded=False):
+                st.caption(
+                    f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
                 )
-                next_blank_sort = selected_sort
-                queue_after_save = sort_deals(refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)], next_blank_sort)
-                blanks = queue_after_save[
-                    queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")
-                ]["_excel_row"].tolist()
-                for row_num in blanks:
-                    if row_num != int(selected["_excel_row"]):
-                        next_row = row_num
-                        break
-                if next_row is None and current_idx < len(option_rows) - 1:
+
+        flash_message = st.session_state.pop("flash_message", None)
+        if flash_message:
+            st.success(flash_message)
+
+        if sorted_df.empty:
+            st.warning("No deals match the current filters.")
+            return
+
+        if workspace_mode == "Review workspace":
+            order_label = "workbook file order" if selected_sort == "Workbook file order" else selected_sort.lower()
+            st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
+
+        render_queue_navigation(sorted_df)
+
+        selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
+        queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
+        queue_total = len(sorted_df)
+        if workspace_mode == "Overview":
+            render_overview(sorted_df, parsed.get("snapshot_label"), picklists)
+        elif workspace_mode == "Bulk update":
+            edited_subset = render_bulk_edit(sorted_df, picklists, comment_date)
+            if edited_subset is not None:
+                full_editor = st.session_state["editor_df"].set_index("_excel_row")
+                edited_lookup = edited_subset.set_index("_excel_row")
+                for row_num in edited_lookup.index:
+                    if row_num not in full_editor.index:
+                        continue
+                    for header in edited_lookup.columns:
+                        if header in {"Comment History", "Comments Preview", "Previous Weekly Comment", "Last Comment Date"}:
+                            continue
+                        if header in full_editor.columns:
+                            full_editor.loc[row_num, header] = edited_lookup.loc[row_num, header]
+                st.session_state["editor_df"] = refresh_editor_derived_fields(full_editor.reset_index(), comment_date)
+                st.success("Bulk grid changes applied in the app view.")
+                st.rerun()
+        else:
+            render_deal_header(selected, queue_position, queue_total)
+            updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
+            if updates:
+                advance_mode = updates.pop("_advance_mode", "stay")
+                st.session_state["editor_df"] = apply_detail_edit(
+                    st.session_state["editor_df"],
+                    int(selected["_excel_row"]),
+                    updates,
+                    comment_date,
+                )
+                option_rows = sorted_df["_excel_row"].tolist()
+                current_idx = option_rows.index(int(selected["_excel_row"]))
+                next_row = None
+                if advance_mode == "next" and current_idx < len(option_rows) - 1:
                     next_row = option_rows[current_idx + 1]
-            if next_row is not None:
-                st.session_state["selected_row"] = next_row
-            st.session_state["flash_message"] = "Deal edits saved."
-            st.rerun()
+                elif advance_mode == "next_blank":
+                    refreshed_after_save = build_display_view(
+                        base_deals=parsed["deals_df"],
+                        editor_df=st.session_state["editor_df"],
+                        property_summary=parsed["property_summary"],
+                        entry_date=comment_date,
+                        picklists=picklists,
+                    )
+                    next_blank_sort = selected_sort
+                    queue_after_save = sort_deals(refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)], next_blank_sort)
+                    blanks = queue_after_save[
+                        queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")
+                    ]["_excel_row"].tolist()
+                    for row_num in blanks:
+                        if row_num != int(selected["_excel_row"]):
+                            next_row = row_num
+                            break
+                    if next_row is None and current_idx < len(option_rows) - 1:
+                        next_row = option_rows[current_idx + 1]
+                if next_row is not None:
+                    st.session_state["selected_row"] = next_row
+                st.session_state["flash_message"] = "Deal edits saved."
+                st.rerun()
 
-    changes = workbook_change_set(
-        st.session_state["editor_df"],
-        parsed["original_editor_values"],
-        comment_date,
-    )
-    changed_deals = len({row for row, _ in changes.keys()})
-
-    st.divider()
-    summary_col, action_col = st.columns([2, 1])
-    with summary_col:
-        st.write(f"Pending edits in the app view: **{len(changes)} cells across {changed_deals} deal(s)**")
-        summary_parts = []
-        if queue_view != "All deals":
-            summary_parts.append(f"queue focus: {queue_view}")
-        summary_parts.append(f"order: {selected_sort.lower()}")
-        st.caption(" · ".join(summary_parts))
-    with action_col:
-        if st.button("Reset all app edits", width="stretch"):
-            st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
-            st.rerun()
-
-    updated_bytes = (
-        build_updated_workbook(
-            file_bytes=file_bytes,
-            sheet_path=parsed["deal_sheet_path"],
-            changes=changes,
-            cell_meta=parsed["cell_meta"],
-            sheet_name=parsed["deal_sheet"],
+        changes = workbook_change_set(
+            st.session_state["editor_df"],
+            parsed["original_editor_values"],
+            comment_date,
         )
-        if changes
-        else file_bytes
-    )
+        changed_deals = len({row for row, _ in changes.keys()})
 
-    quarter_label = infer_quarter_label(workbook_name, parsed.get("snapshot_label"))
-    download_name = f"{quarter_label} NPL Resolutions.xlsx"
-    st.download_button(
-        "Download updated workbook",
-        data=updated_bytes,
-        file_name=download_name,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        width="stretch",
-    )
+        st.divider()
+        summary_col, action_col = st.columns([2, 1])
+        with summary_col:
+            st.write(f"Pending edits in the app view: **{len(changes)} cells across {changed_deals} deal(s)**")
+            summary_parts = []
+            if queue_view != "All deals":
+                summary_parts.append(f"queue focus: {queue_view}")
+            summary_parts.append(f"order: {selected_sort.lower()}")
+            st.caption(" · ".join(summary_parts))
+        with action_col:
+            if st.button("Reset all app edits", width="stretch"):
+                st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
+                st.rerun()
+
+        updated_bytes = (
+            build_updated_workbook(
+                file_bytes=file_bytes,
+                sheet_path=parsed["deal_sheet_path"],
+                changes=changes,
+                cell_meta=parsed["cell_meta"],
+                sheet_name=parsed["deal_sheet"],
+            )
+            if changes
+            else file_bytes
+        )
+
+        quarter_label = infer_quarter_label(workbook_name, parsed.get("snapshot_label"))
+        download_name = f"{quarter_label} NPL Resolutions.xlsx"
+        st.download_button(
+            "Download updated workbook",
+            data=updated_bytes,
+            file_name=download_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            width="stretch",
+        )
 
 
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
