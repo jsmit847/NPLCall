@@ -50,12 +50,7 @@ def apply_base_css() -> None:
     st.markdown(
         """
         <style>
-            .block-container {
-                padding-top: 0.65rem;
-                padding-bottom: 1rem;
-                max-width: 100%;
-            }
-
+            /* Presentation-only classes used by the main deal view */
             .deal-header {
                 border: 1px solid #d7dbe2;
                 border-radius: 14px;
@@ -234,7 +229,6 @@ def apply_base_css() -> None:
         """,
         unsafe_allow_html=True,
     )
-
 
 def safe_text(value: Any) -> str:
     text = editable_text(value)
