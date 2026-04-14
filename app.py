@@ -270,8 +270,23 @@ def infer_quarter_label(workbook_name: str | None, snapshot_label: str | None) -
     return f"{q}Q{str(today.year)[-2:]}"
 
 
+def build_quarter_choices(start_year: int = 2026, start_quarter: int = 2, end_year: int = 2030) -> list[str]:
+    options: list[str] = []
+    for year in range(start_year, end_year + 1):
+        first_q = start_quarter if year == start_year else 1
+        for quarter in range(first_q, 5):
+            options.append(f"{quarter}Q{str(year)[-2:]}")
+    return options
+
+
+QUARTER_TIMING_OPTIONS = build_quarter_choices()
+
+
 def field_options(field: str, picklists: dict[str, list[str]], current_value: str) -> list[str]:
-    options = [""] + picklists.get(field, [])
+    if field in {"Resolution Timing", "Liquidity Event Timing"}:
+        options = [""] + QUARTER_TIMING_OPTIONS.copy()
+    else:
+        options = [""] + picklists.get(field, [])
     current = (current_value or "").strip()
     if current and current not in options:
         options.append(current)
@@ -296,7 +311,6 @@ def init_state(file_hash: str, parsed: dict[str, Any]) -> None:
     st.session_state["file_hash"] = file_hash
     st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
     st.session_state["selected_row"] = None
-    st.session_state.setdefault("controls_hidden", False)
 
 
 def stash_uploaded_workbook(uploaded_file: Any) -> None:
@@ -374,47 +388,47 @@ def get_filtered_sorted_df(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date
 
 
 def render_left_controls(display_df: pd.DataFrame) -> None:
-    st.markdown("### Presentation controls")
-    st.caption("Hide this panel when you want the presentation to take more space.")
+    with st.expander("Presentation controls", expanded=False):
+        st.caption("Open this when you want to change order or filter scope.")
 
-    st.date_input(
-        "Current week comment date",
-        value=st.session_state.get("comment_date", date.today()),
-        key="comment_date_input",
-    )
+        st.date_input(
+            "Current week comment date",
+            value=st.session_state.get("comment_date", date.today()),
+            key="comment_date_input",
+        )
 
-    asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
+        asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
 
-    st.segmented_control(
-        "Presentation order",
-        options=["Workbook file order", "Asset Manager order"],
-        default=st.session_state.get("presentation_order_value", "Workbook file order"),
-        selection_mode="single",
-        key="presentation_order_value",
-    )
+        st.segmented_control(
+            "Presentation order",
+            options=["Workbook file order", "Asset Manager order"],
+            default=st.session_state.get("presentation_order_value", "Workbook file order"),
+            selection_mode="single",
+            key="presentation_order_value",
+        )
 
-    st.pills(
-        "Show deals for",
-        options=["All asset managers"] + asset_managers,
-        selection_mode="single",
-        default=st.session_state.get("am_scope_value", "All asset managers"),
-        key="am_scope_value",
-    )
+        st.pills(
+            "Show deals for",
+            options=["All asset managers"] + asset_managers,
+            selection_mode="single",
+            default=st.session_state.get("am_scope_value", "All asset managers"),
+            key="am_scope_value",
+        )
 
-    st.multiselect(
-        "Bridge / Term",
-        sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
-        key="bridge_term_multiselect",
-    )
-    st.multiselect(
-        "Segment",
-        sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
-        key="segment_multiselect",
-    )
-    st.text_input(
-        "Search deal number, name, or location",
-        key="deal_search_input",
-    )
+        st.multiselect(
+            "Bridge / Term",
+            sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
+            key="bridge_term_multiselect",
+        )
+        st.multiselect(
+            "Segment",
+            sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
+            key="segment_multiselect",
+        )
+        st.text_input(
+            "Search deal number, name, or location",
+            key="deal_search_input",
+        )
 
 
 def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
@@ -626,7 +640,7 @@ def editable_field_input(field: str, current_value: str, picklists: dict[str, li
             st.caption(f"Formatted value: {preview}")
         return typed_value
 
-    if field in picklists:
+    if field in picklists or field in {"Resolution Timing", "Liquidity Event Timing"}:
         options = field_options(field, picklists, current_value)
         return st.selectbox(field, options, index=selected_index(options, current_value))
 
@@ -703,22 +717,26 @@ def render_review_form(
 
         left, middle, right = st.columns([0.95, 1.35, 1.35])
 
-        with left:
-            st.subheader("Context")
-            render_context_column(selected)
-
-        with middle:
-            st.subheader("Manual updates")
-            for section_title, fields in SECTION_MAP.items():
-                present_fields = [field for field in fields if field in selected.index and field != COMMENT_STORAGE_FIELD]
-                if not present_fields:
-                    continue
-                st.markdown(f"**{section_title}**")
-                for field in present_fields:
-                    updates[field] = editable_field_input(field, editable_text(selected.get(field)), picklists)
-
         with right:
             st.subheader("Weekly comments")
+            template_options = field_options("Comment Template", {"Comment Template": COMMENT_TEMPLATE_OPTIONS}, "")
+            comment_template = st.selectbox("Quick comment helper", template_options, index=0)
+            current_week = st.text_area(
+                "This week comment",
+                editable_text(selected.get("This Week Comment")),
+                height=155,
+                help="This will be prepended to the existing Addt'l NPL Comment history on save/export.",
+            )
+            built_comment = build_weekly_comment_text(current_week, comment_template)
+            updates["This Week Comment"] = built_comment
+
+            if built_comment:
+                preview_text = f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip()
+                st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}")
+            else:
+                preview_text = editable_text(selected.get("Comments Preview"))
+                st.caption("No current-week comment entered yet.")
+
             st.markdown("**Previous weekly comment**")
             st.markdown(
                 f"<div class='scroll-note'>{editable_text(selected.get('Previous Weekly Comment')) or '-'}</div>",
@@ -738,25 +756,6 @@ def render_review_form(
                     disabled=True,
                     height=220,
                 )
-
-            template_options = field_options("Comment Template", {"Comment Template": COMMENT_TEMPLATE_OPTIONS}, "")
-            comment_template = st.selectbox("Quick comment helper", template_options, index=0)
-            current_week = st.text_area(
-                "This week comment",
-                editable_text(selected.get("This Week Comment")),
-                height=155,
-                help="This will be prepended to the existing Addt'l NPL Comment history on save/export.",
-            )
-            built_comment = build_weekly_comment_text(current_week, comment_template)
-            updates["This Week Comment"] = built_comment
-
-            if built_comment:
-                preview_text = f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip()
-                st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}")
-            else:
-                preview_text = editable_text(selected.get("Comments Preview"))
-                st.caption("No current-week comment entered yet.")
-
             with st.popover("Comment preview", width="stretch"):
                 st.text_area(
                     "Addt'l NPL Comment preview",
@@ -764,6 +763,20 @@ def render_review_form(
                     disabled=True,
                     height=200,
                 )
+
+        with middle:
+            st.subheader("Manual updates")
+            for section_title, fields in SECTION_MAP.items():
+                present_fields = [field for field in fields if field in selected.index and field != COMMENT_STORAGE_FIELD]
+                if not present_fields:
+                    continue
+                st.markdown(f"**{section_title}**")
+                for field in present_fields:
+                    updates[field] = editable_field_input(field, editable_text(selected.get(field)), picklists)
+
+        with left:
+            st.subheader("Context")
+            render_context_column(selected)
 
         st.markdown("<div class='action-bar'>", unsafe_allow_html=True)
         action_left, action_mid, action_right = st.columns(3)
@@ -791,49 +804,31 @@ def main() -> None:
     st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="collapsed")
     apply_base_css()
 
-    st.session_state.setdefault("controls_hidden", False)
-
-    if st.session_state["controls_hidden"]:
-        control_col, content_col = st.columns([0.24, 5.76], gap="large")
-    else:
-        control_col, content_col = st.columns([1.05, 4.95], gap="large")
+    control_col, content_col = st.columns([1.05, 4.95], gap="large")
 
     with control_col:
-        if st.session_state["controls_hidden"]:
-            if st.button("Show panel", width="stretch", key="show_panel_btn"):
-                st.session_state["controls_hidden"] = False
-                st.rerun()
-        else:
-            st.markdown('<div class="side-panel">', unsafe_allow_html=True)
-            top_left, top_right = st.columns([1, 1])
-            with top_left:
-                st.markdown("### Controls")
-            with top_right:
-                if st.button("Hide panel", width="stretch", key="hide_panel_btn"):
-                    st.session_state["controls_hidden"] = True
-                    st.rerun()
+        st.markdown('<div class="side-panel">', unsafe_allow_html=True)
+        file_bytes, workbook_name = get_active_workbook()
+        if file_bytes is not None:
+            file_hash = hashlib.md5(file_bytes).hexdigest()
+            parsed = cached_parse_workbook(file_bytes)
+            picklists = cached_picklists(parsed["deals_df"])
 
-            file_bytes, workbook_name = get_active_workbook()
-            if file_bytes is not None:
-                file_hash = hashlib.md5(file_bytes).hexdigest()
-                parsed = cached_parse_workbook(file_bytes)
-                picklists = cached_picklists(parsed["deals_df"])
+            if st.session_state.get("file_hash") != file_hash:
+                init_state(file_hash, parsed)
 
-                if st.session_state.get("file_hash") != file_hash:
-                    init_state(file_hash, parsed)
+            comment_date = st.session_state.get("comment_date", date.today())
+            st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
 
-                comment_date = st.session_state.get("comment_date", date.today())
-                st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
-
-                display_df = build_display_view(
-                    base_deals=parsed["deals_df"],
-                    editor_df=st.session_state["editor_df"],
-                    property_summary=parsed["property_summary"],
-                    entry_date=comment_date,
-                    picklists=picklists,
-                )
-                render_left_controls(display_df)
-            st.markdown("</div>", unsafe_allow_html=True)
+            display_df = build_display_view(
+                base_deals=parsed["deals_df"],
+                editor_df=st.session_state["editor_df"],
+                property_summary=parsed["property_summary"],
+                entry_date=comment_date,
+                picklists=picklists,
+            )
+            render_left_controls(display_df)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if st.session_state.get("workbook_bytes") is None:
         with content_col:
