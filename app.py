@@ -11,7 +11,6 @@ import streamlit as st
 from workbook_utils import (
     COMMENT_TEMPLATE_OPTIONS,
     COMMENT_STORAGE_FIELD,
-    GRID_CONTEXT_HEADERS,
     LONG_TEXT_FIELDS,
     MANUAL_ENTRY_PICKLIST_FIELDS,
     NUMERIC_OR_TEXT_FIELDS,
@@ -22,8 +21,8 @@ from workbook_utils import (
     build_updated_workbook,
     build_weekly_comment_text,
     editable_text,
-    format_deal_label,
     format_comment_entry_date,
+    format_deal_label,
     make_editor_df,
     metric_currency,
     metric_date,
@@ -52,48 +51,63 @@ def apply_base_css() -> None:
         """
         <style>
             .block-container {
-                padding-top: 0.7rem;
+                padding-top: 0.65rem;
                 padding-bottom: 1rem;
                 max-width: 100%;
             }
             [data-testid="stSidebar"] {display: none !important;}
             [data-testid="collapsedControl"] {display: none !important;}
             section[data-testid="stSidebar"] {display: none !important;}
-            h1 {font-size: 1.35rem !important; margin-bottom: 0.1rem !important;}
-            h2 {font-size: 1.05rem !important; margin-top: 0.35rem !important;}
-            h3 {font-size: 0.95rem !important; margin-top: 0.25rem !important;}
-            div[data-testid="stMetricValue"] {font-size: 1.25rem !important; font-weight: 900 !important;}
-            div[data-testid="stMetricLabel"] {font-size: 0.86rem !important; font-weight: 800 !important;}
+
+            h1, h2, h3 {margin-top: 0.15rem !important;}
+            div[data-testid="stMetricValue"] {font-size: 1.2rem !important; font-weight: 900 !important;}
+            div[data-testid="stMetricLabel"] {font-size: 0.82rem !important; font-weight: 800 !important;}
+
+            .shell-grid {
+                display: grid;
+                grid-template-columns: 310px minmax(0, 1fr);
+                gap: 1rem;
+                align-items: start;
+            }
+
             .side-panel {
                 border: 1px solid #dfe6ef;
-                border-radius: 14px;
-                padding: 0.9rem 0.9rem 0.7rem 0.9rem;
+                border-radius: 16px;
+                padding: 0.9rem 0.9rem 0.8rem 0.9rem;
                 background: #fbfcfe;
                 position: sticky;
-                top: 0.75rem;
+                top: 0.7rem;
             }
+
+            .panel-caption {
+                color: #667085;
+                font-size: 0.8rem;
+                margin-top: -0.25rem;
+                margin-bottom: 0.5rem;
+            }
+
             .deal-header {
                 border: 1px solid #d7dbe2;
-                border-radius: 12px;
-                padding: 0.7rem 0.9rem;
-                margin-bottom: 0.6rem;
+                border-radius: 14px;
+                padding: 0.8rem 0.95rem;
+                margin-bottom: 0.65rem;
                 background: #fbfcfe;
             }
             .deal-title {
-                font-size: 1.95rem;
+                font-size: 2.05rem;
                 font-weight: 950;
-                line-height: 1.08;
-                margin-right: 0.55rem;
+                line-height: 1.06;
+                margin-right: 0.6rem;
             }
             .deal-number {
-                font-size: 1.08rem;
-                font-weight: 850;
+                font-size: 1.1rem;
+                font-weight: 900;
                 color: #475467;
-                margin-right: 0.5rem;
+                margin-right: 0.55rem;
             }
             .am-badge {
                 display: inline-block;
-                padding: 0.28rem 0.7rem;
+                padding: 0.28rem 0.72rem;
                 border-radius: 999px;
                 border: 1px solid #c9daf8;
                 background: #eef4ff;
@@ -101,11 +115,101 @@ def apply_base_css() -> None:
                 font-weight: 950;
             }
             .deal-subtitle {
-                margin-top: 0.2rem;
+                margin-top: 0.24rem;
                 color: #5c6570;
-                font-size: 0.78rem;
+                font-size: 0.8rem;
                 line-height: 1.2;
             }
+
+            .kpi-grid {
+                display: grid;
+                grid-template-columns: repeat(6, minmax(110px, 1fr));
+                gap: 0.5rem;
+                margin-bottom: 0.45rem;
+            }
+            .kpi-box {
+                border: 1px solid #dfe6ef;
+                border-radius: 14px;
+                padding: 0.76rem 0.8rem;
+                background: white;
+                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+            }
+            .kpi-box .label {
+                color: #667085;
+                font-size: 0.79rem;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+                font-weight: 800;
+            }
+            .kpi-box .value {
+                margin-top: 0.2rem;
+                font-size: 1.5rem;
+                font-weight: 950;
+                line-height: 1.03;
+            }
+
+            .presenter-panel {
+                border: 1px solid #dfe6ef;
+                border-radius: 14px;
+                padding: 0.8rem 0.95rem;
+                background: white;
+                margin-bottom: 0.55rem;
+            }
+            .presenter-section-title {
+                font-size: 0.88rem;
+                font-weight: 900;
+                margin: 0.06rem 0 0.42rem 0;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+            }
+
+            .snapshot-grid {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.9rem;
+                margin-top: 0.25rem;
+            }
+            .snapshot-card {
+                border: 1px solid #dce5f0;
+                border-radius: 14px;
+                padding: 0.76rem 0.84rem;
+                background: #fcfdff;
+                min-height: 100%;
+            }
+            .snapshot-section-title {
+                color: #0f172a;
+                font-size: 0.9rem;
+                text-transform: uppercase;
+                letter-spacing: 0.03em;
+                margin-bottom: 0.4rem;
+                font-weight: 850;
+            }
+            .snapshot-row {
+                display: grid;
+                grid-template-columns: 10.25rem 1fr;
+                gap: 0.4rem;
+                padding: 0.18rem 0;
+                border-top: 1px solid #edf2f7;
+            }
+            .snapshot-row:first-child {
+                border-top: none;
+                padding-top: 0;
+            }
+            .snapshot-label {
+                color: #667085;
+                font-size: 0.73rem;
+                text-transform: uppercase;
+                letter-spacing: 0.02em;
+                font-weight: 750;
+            }
+            .snapshot-value {
+                font-size: 1.04rem;
+                line-height: 1.32;
+                font-weight: 820;
+                color: #0f172a;
+                white-space: pre-wrap;
+            }
+
             .small-card {
                 border: 1px solid #e5e7eb;
                 border-radius: 10px;
@@ -120,115 +224,23 @@ def apply_base_css() -> None:
                 letter-spacing: 0.02em;
             }
             .small-card .value {
-                font-size: 0.92rem;
-                font-weight: 600;
+                font-size: 0.94rem;
+                font-weight: 650;
                 margin-top: 0.12rem;
             }
-            .presenter-panel {
-                border: 1px solid #dfe6ef;
-                border-radius: 12px;
-                padding: 0.8rem 0.95rem;
-                background: white;
-                height: 100%;
+
+            .status-chip {
+                display: inline-block;
+                padding: 0.14rem 0.42rem;
+                border-radius: 999px;
+                border: 1px solid #d1d5db;
+                margin-right: 0.25rem;
+                margin-bottom: 0.22rem;
+                font-size: 0.75rem;
+                background: #f9fafb;
+                font-weight: 650;
             }
-            .kpi-grid {
-                display: grid;
-                grid-template-columns: repeat(7, minmax(110px, 1fr));
-                gap: 0.45rem;
-                margin-bottom: 0.45rem;
-            }
-            .kpi-box {
-                border: 1px solid #dfe6ef;
-                border-radius: 12px;
-                padding: 0.72rem 0.78rem;
-                background: white;
-                box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-            }
-            .kpi-box .label {
-                color: #667085;
-                font-size: 0.8rem;
-                text-transform: uppercase;
-                letter-spacing: 0.03em;
-                font-weight: 800;
-            }
-            .kpi-box .value {
-                margin-top: 0.18rem;
-                font-size: 1.42rem;
-                font-weight: 950;
-                line-height: 1.05;
-            }
-            .kpi-comment {
-                border: 1px solid #e5e7eb;
-                border-radius: 10px;
-                padding: 0.55rem 0.7rem;
-                background: #ffffff;
-                margin-top: 0.45rem;
-                min-height: 5.4rem;
-            }
-            .kpi-comment .label {
-                color: #6b7280;
-                font-size: 0.72rem;
-                text-transform: uppercase;
-                letter-spacing: 0.02em;
-                margin-bottom: 0.2rem;
-            }
-            .kpi-comment .value {
-                font-size: 0.95rem;
-                line-height: 1.32;
-                white-space: pre-wrap;
-                font-weight: 600;
-            }
-            .presenter-section-title {
-                font-size: 0.86rem;
-                font-weight: 700;
-                margin: 0.1rem 0 0.35rem 0;
-            }
-            .snapshot-grid {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 0.85rem;
-                margin-top: 0.35rem;
-            }
-            .snapshot-card {
-                border: 1px solid #dce5f0;
-                border-radius: 14px;
-                padding: 0.75rem 0.85rem;
-                background: #fcfdff;
-                min-height: 100%;
-            }
-            .snapshot-section-title {
-                color: #0f172a;
-                font-size: 0.9rem;
-                text-transform: uppercase;
-                letter-spacing: 0.03em;
-                margin-bottom: 0.4rem;
-                font-weight: 800;
-            }
-            .snapshot-row {
-                display: grid;
-                grid-template-columns: 10rem 1fr;
-                gap: 0.35rem;
-                padding: 0.16rem 0;
-                border-top: 1px solid #edf2f7;
-            }
-            .snapshot-row:first-child {
-                border-top: none;
-                padding-top: 0;
-            }
-            .snapshot-label {
-                color: #667085;
-                font-size: 0.73rem;
-                text-transform: uppercase;
-                letter-spacing: 0.02em;
-                font-weight: 700;
-            }
-            .snapshot-value {
-                font-size: 1.03rem;
-                line-height: 1.35;
-                font-weight: 800;
-                color: #0f172a;
-                white-space: pre-wrap;
-            }
+
             .action-bar {
                 border: 1px solid #dfe6ef;
                 border-radius: 12px;
@@ -236,17 +248,19 @@ def apply_base_css() -> None:
                 background: #f8fbff;
                 margin-top: 0.35rem;
             }
-            .status-chip {
-                display: inline-block;
-                padding: 0.14rem 0.4rem;
-                border-radius: 999px;
-                border: 1px solid #d1d5db;
-                margin-right: 0.25rem;
-                margin-bottom: 0.2rem;
-                font-size: 0.75rem;
-                background: #f9fafb;
-                font-weight: 600;
+
+            .scroll-note {
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 0.55rem 0.7rem;
+                background: #ffffff;
+                height: 145px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                font-size: 0.95rem;
+                line-height: 1.32;
             }
+
             header, footer {visibility: hidden;}
         </style>
         """,
@@ -261,18 +275,13 @@ def safe_text(value: Any) -> str:
 
 def infer_quarter_label(workbook_name: str | None, snapshot_label: str | None) -> str:
     name = (workbook_name or "").strip()
-    patterns = [
-        r"(\b[1-4]Q\d{2}\b)",
-        r"(\b[1-4]Q\d{4}\b)",
-    ]
-    for pattern in patterns:
+    for pattern in [r"(\b[1-4]Q\d{2}\b)", r"(\b[1-4]Q\d{4}\b)"]:
         match = re.search(pattern, name, flags=re.IGNORECASE)
         if match:
             return match.group(1).upper()
     today = date.today()
     q = ((today.month - 1) // 3) + 1
-    yy = str(today.year)[-2:]
-    return f"{q}Q{yy}"
+    return f"{q}Q{str(today.year)[-2:]}"
 
 
 def field_options(field: str, picklists: dict[str, list[str]], current_value: str) -> list[str]:
@@ -285,9 +294,7 @@ def field_options(field: str, picklists: dict[str, list[str]], current_value: st
 
 def selected_index(options: list[str], current_value: str) -> int:
     current = (current_value or "").strip()
-    if current in options:
-        return options.index(current)
-    return 0
+    return options.index(current) if current in options else 0
 
 
 def numeric_sum(series: pd.Series) -> float:
@@ -303,6 +310,7 @@ def init_state(file_hash: str, parsed: dict[str, Any]) -> None:
     st.session_state["file_hash"] = file_hash
     st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
     st.session_state["selected_row"] = None
+    st.session_state.setdefault("controls_open", True)
 
 
 def stash_uploaded_workbook(uploaded_file: Any) -> None:
@@ -319,76 +327,68 @@ def clear_uploaded_workbook() -> None:
         "file_hash",
         "editor_df",
         "selected_row",
-        "sidebar_workbook_upload",
+        "workbook_upload_input",
     ]:
         st.session_state.pop(key, None)
 
 
-def get_active_workbook(container) -> tuple[bytes | None, str | None]:
-    with container:
-        st.markdown("### Workbook")
-        if st.session_state.get("workbook_name"):
-            st.caption(f"Current workbook: {st.session_state['workbook_name']}")
-            if st.button("Clear workbook", width="stretch", key="clear_workbook_btn"):
-                clear_uploaded_workbook()
-                st.rerun()
+def get_active_workbook() -> tuple[bytes | None, str | None]:
+    st.markdown("### Workbook")
+    if st.session_state.get("workbook_name"):
+        st.caption(f"Current workbook: {st.session_state['workbook_name']}")
+        if st.button("Clear workbook", width="stretch", key="clear_workbook_btn"):
+            clear_uploaded_workbook()
+            st.rerun()
 
-        upload = st.file_uploader(
-            "Upload workbook",
-            type=["xlsx"],
-            key="sidebar_workbook_upload",
-            help="Choose the latest NPL workbook to open the review workspace.",
-        )
-        if upload is not None:
-            stash_uploaded_workbook(upload)
+    upload = st.file_uploader(
+        "Upload workbook",
+        type=["xlsx"],
+        key="workbook_upload_input",
+        help="Choose the latest NPL workbook to open presentation mode.",
+    )
+    if upload is not None:
+        stash_uploaded_workbook(upload)
 
-        if st.session_state.get("workbook_bytes") is None:
-            st.info("Upload the workbook to begin.")
-            return None, None
-
+    if st.session_state.get("workbook_bytes") is None:
+        st.info("Upload the workbook to begin.")
+        return None, None
     return st.session_state.get("workbook_bytes"), st.session_state.get("workbook_name")
 
 
-def apply_filters(display_df: pd.DataFrame, controls_container) -> tuple[pd.DataFrame, date, str, str, str]:
-    with controls_container:
-        st.markdown("### Review controls")
-        st.caption("Choose presentation order and deal scope here.")
+def render_left_controls(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str]:
+    with st.expander("Presentation controls", expanded=st.session_state.get("controls_open", True)):
+        st.caption("Collapse this panel when you want the presentation to take more space.")
 
-        workspace_mode = st.radio(
-            "Workspace",
-            ["Review workspace", "Overview", "Bulk update"],
-            index=0,
-            key="workspace_mode_radio",
-        )
+        workspace_mode = "Presentation mode"
         comment_date = st.date_input(
             "Current week comment date",
             value=st.session_state.get("comment_date", date.today()),
             key="comment_date_input",
         )
         st.session_state["comment_date"] = comment_date
-        show_hidden = st.checkbox(
-            "Include workbook-hidden rows",
-            value=False,
-            key="show_hidden_checkbox",
-        )
 
         asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
 
-        presentation_order = st.selectbox(
+        presentation_order = st.segmented_control(
             "Presentation order",
-            ["Workbook file order", "Asset Manager order"],
-            index=0,
-            key="presentation_order_select",
-            help="Choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
+            options=["Workbook file order", "Asset Manager order"],
+            default=st.session_state.get("presentation_order_value", "Workbook file order"),
+            selection_mode="single",
+            key="presentation_order_value",
         )
+        if not presentation_order:
+            presentation_order = "Workbook file order"
 
-        am_scope = st.selectbox(
+        pill_options = ["All asset managers"] + asset_managers
+        am_scope = st.pills(
             "Show deals for",
-            ["All asset managers"] + asset_managers if asset_managers else ["All asset managers"],
-            index=0,
-            key="am_scope_select",
-            help="Pick one Asset Manager here to review only that AM's deals.",
+            options=pill_options,
+            selection_mode="single",
+            default=st.session_state.get("am_scope_value", "All asset managers"),
+            key="am_scope_value",
         )
+        if not am_scope:
+            am_scope = "All asset managers"
 
         selected_bt = st.multiselect(
             "Bridge / Term",
@@ -400,40 +400,16 @@ def apply_filters(display_df: pd.DataFrame, controls_container) -> tuple[pd.Data
             sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
             key="segment_multiselect",
         )
-        queue_view = st.selectbox(
-            "Queue focus",
-            [
-                "All deals",
-                "Missing current-week comment",
-                "Needs discussion",
-                "Has data flags",
-            ],
-            key="queue_focus_select",
-        )
-        manual_sort = st.selectbox(
-            "Secondary sort",
-            [
-                "Use presentation order only",
-                "Deal Name",
-                "UPB desc",
-                "Flag count desc",
-                "Last comment date desc",
-            ],
-            index=0,
-            key="secondary_sort_select",
-        )
         search = st.text_input(
             "Search deal number, name, or location",
             key="deal_search_input",
         )
 
     filtered_df = display_df.copy()
-    if not show_hidden:
-        filtered_df = filtered_df[~filtered_df["_workbook_hidden"]]
+    filtered_df = filtered_df[~filtered_df["_workbook_hidden"]]
 
     if am_scope != "All asset managers":
         filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).eq(am_scope)]
-
     if selected_bt:
         filtered_df = filtered_df[filtered_df["Bridge / Term"].astype(str).isin(selected_bt)]
     if selected_segment:
@@ -446,28 +422,12 @@ def apply_filters(display_df: pd.DataFrame, controls_container) -> tuple[pd.Data
             | filtered_df["Location"].astype(str).str.lower().str.contains(needle)
         ]
 
-    if queue_view == "Missing current-week comment":
-        filtered_df = filtered_df[filtered_df["This Week Comment"].fillna("").astype(str).str.strip().eq("")]
-    elif queue_view == "Needs discussion":
-        filtered_df = filtered_df[filtered_df["Needs Discussion"].fillna(False)]
-    elif queue_view == "Has data flags":
-        filtered_df = filtered_df[filtered_df["Flag Count"] > 0]
-
     selected_sort = "Workbook file order" if presentation_order == "Workbook file order" else "Asset Manager / Deal"
-    if manual_sort == "Deal Name":
-        selected_sort = "Deal Name"
-    elif manual_sort == "UPB desc":
-        selected_sort = "UPB desc"
-    elif manual_sort == "Flag count desc":
-        selected_sort = "Flag count desc"
-    elif manual_sort == "Last comment date desc":
-        selected_sort = "Last comment date desc"
-
     sorted_df = sort_deals(filtered_df, selected_sort).reset_index(drop=True)
-    return sorted_df, comment_date, queue_view, workspace_mode, selected_sort
+    return sorted_df, comment_date, workspace_mode, selected_sort
 
 
-def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
+def render_queue_navigation(sorted_df: pd.DataFrame, selected_sort: str) -> None:
     option_rows = sorted_df["_excel_row"].tolist()
     if not option_rows:
         return
@@ -476,8 +436,10 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
         st.session_state["selected_row"] = option_rows[0]
 
     current_idx = option_rows.index(st.session_state["selected_row"])
+    selected_row_value = st.session_state["selected_row"]
+    current_am = safe_text(sorted_df[sorted_df["_excel_row"] == selected_row_value].iloc[0].get("Asset Manager"))
 
-    nav1, nav2, nav3 = st.columns([1, 1, 5])
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 1.3, 5.2])
     with nav1:
         if st.button("Previous", disabled=current_idx == 0, width="stretch"):
             st.session_state["selected_row"] = option_rows[current_idx - 1]
@@ -487,6 +449,17 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
             st.session_state["selected_row"] = option_rows[current_idx + 1]
             st.rerun()
     with nav3:
+        if st.button("Next same AM", width="stretch"):
+            next_same_am = None
+            for row_num in option_rows[current_idx + 1:]:
+                row_am = safe_text(sorted_df[sorted_df["_excel_row"] == row_num].iloc[0].get("Asset Manager"))
+                if row_am == current_am:
+                    next_same_am = row_num
+                    break
+            if next_same_am is not None:
+                st.session_state["selected_row"] = next_same_am
+                st.rerun()
+    with nav4:
         selected_row = st.selectbox(
             "Deal queue",
             option_rows,
@@ -525,19 +498,23 @@ def render_metric_strip(selected: pd.Series) -> None:
         ("ARV", metric_currency(selected.get("Salesforce ARV"))),
         ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV"))),
         ("DQ", safe_text(selected.get("Current DQ Status"))),
-        ("Last comment date", metric_date(selected.get("Last Comment Date"))),
     ]
     html = ["<div class='kpi-grid'>"]
     for label, value in items:
-        html.append(
-            f"<div class='kpi-box'><div class='label'>{label}</div><div class='value'>{value}</div></div>"
-        )
+        html.append(f"<div class='kpi-box'><div class='label'>{label}</div><div class='value'>{value}</div></div>")
     html.append("</div>")
     st.markdown("".join(html), unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='kpi-comment'><div class='label'>Previous weekly comment</div><div class='value'>{safe_text(selected.get('Previous Weekly Comment'))}</div></div>",
-        unsafe_allow_html=True,
-    )
+
+    previous_week_comment = editable_text(selected.get("Previous Weekly Comment"))
+    last_comment_date = metric_date(selected.get("Last Comment Date"))
+    popover_label = f"Previous weekly comment · {last_comment_date}" if last_comment_date != "-" else "Previous weekly comment"
+
+    with st.popover(popover_label, use_container_width=True):
+        st.markdown("**Previous weekly comment**")
+        st.markdown(
+            f"<div class='scroll-note'>{previous_week_comment if previous_week_comment else '-'}</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def render_status_chips(selected: pd.Series) -> None:
@@ -577,11 +554,6 @@ def render_context_column(selected: pd.Series) -> None:
     render_small_kv_card("Maturity", metric_date(selected.get("Maturity Date")))
     render_small_kv_card("Next payment", metric_date(selected.get("Next Payment Date")))
     render_small_kv_card("Convention", selected.get("MBA Loan List Convention"))
-
-    if selected.get("Flag Count", 0) > 0:
-        st.warning(selected.get("Flag Summary") or "This deal has data quality flags.")
-    else:
-        st.success("No data flags detected for the current row.")
 
 
 def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) -> None:
@@ -627,7 +599,7 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
                 display_related["Days Past Due"] = display_related["Days Past Due"].apply(
                     lambda v: f"{int(v):,}" if normalize_number(v) is not None else safe_text(v)
                 )
-            with st.expander("Property detail", expanded=False):
+            with st.popover("Property detail", use_container_width=False):
                 st.dataframe(display_related, width="stretch", hide_index=True)
 
 
@@ -744,10 +716,6 @@ def render_review_form(
         with left:
             st.subheader("Context")
             render_context_column(selected)
-            updates["Needs Discussion"] = st.checkbox(
-                "Needs discussion",
-                value=bool(selected.get("Needs Discussion", False)),
-            )
 
         with middle:
             st.subheader("Manual updates")
@@ -761,20 +729,19 @@ def render_review_form(
 
         with right:
             st.subheader("Weekly comments")
-            st.text_area(
-                "Previous weekly comment (from Addt'l NPL Comment)",
-                editable_text(selected.get("Previous Weekly Comment")),
-                disabled=True,
-                height=90,
+            st.markdown("**Previous weekly comment**")
+            st.markdown(
+                f"<div class='scroll-note'>{editable_text(selected.get('Previous Weekly Comment')) or '-'}</div>",
+                unsafe_allow_html=True,
             )
-            with st.expander("Full prior comment history", expanded=False):
+            with st.popover("Prior history", use_container_width=True):
                 st.text_area(
                     "Comment history",
                     editable_text(selected.get("Comment History")),
                     disabled=True,
-                    height=220,
+                    height=240,
                 )
-            with st.expander("Salesforce AM comment", expanded=False):
+            with st.popover("Salesforce AM comment", use_container_width=True):
                 st.text_area(
                     "Current Salesforce AM Comment",
                     editable_text(selected.get("Current Salesforce AM Comment")),
@@ -787,39 +754,42 @@ def render_review_form(
             current_week = st.text_area(
                 "This week comment",
                 editable_text(selected.get("This Week Comment")),
-                height=150,
+                height=155,
                 help="This will be prepended to the existing Addt'l NPL Comment history on save/export.",
             )
             built_comment = build_weekly_comment_text(current_week, comment_template)
             updates["This Week Comment"] = built_comment
+
             if built_comment:
                 preview_text = f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip()
                 st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}")
             else:
                 preview_text = editable_text(selected.get("Comments Preview"))
                 st.caption("No current-week comment entered yet.")
-            st.text_area(
-                "Addt'l NPL Comment preview",
-                preview_text,
-                disabled=True,
-                height=170,
-            )
+
+            with st.popover("Comment preview", use_container_width=True):
+                st.text_area(
+                    "Addt'l NPL Comment preview",
+                    preview_text,
+                    disabled=True,
+                    height=200,
+                )
 
         st.markdown("<div class='action-bar'>", unsafe_allow_html=True)
         action_left, action_mid, action_right = st.columns(3)
         with action_left:
-            submitted = st.form_submit_button("Apply deal edits", width="stretch")
+            submitted = st.form_submit_button("Save changes", width="stretch")
         with action_mid:
-            submitted_next = st.form_submit_button("Apply edits + next deal", width="stretch")
+            submitted_next = st.form_submit_button("Save + next deal", width="stretch")
         with action_right:
-            submitted_next_blank = st.form_submit_button("Apply edits + next blank comment", width="stretch")
+            submitted_next_same_am = st.form_submit_button("Save + next same AM", width="stretch")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        if submitted or submitted_next or submitted_next_blank:
+        if submitted or submitted_next or submitted_next_same_am:
             if submitted_next:
                 updates["_advance_mode"] = "next"
-            elif submitted_next_blank:
-                updates["_advance_mode"] = "next_blank"
+            elif submitted_next_same_am:
+                updates["_advance_mode"] = "next_same_am"
             else:
                 updates["_advance_mode"] = "stay"
             return updates
@@ -827,125 +797,21 @@ def render_review_form(
     return None
 
 
-def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None) -> None:
-    st.subheader("Portfolio overview")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Deals in view", f"{len(filtered_df):,}")
-    col2.metric("Total UPB", metric_currency(numeric_sum(filtered_df["Current UPB"])))
-    col3.metric("Asset Managers", f"{filtered_df['Asset Manager'].nunique():,}")
-    col4.metric("Blank current comments", f"{filtered_df['This Week Comment'].fillna('').astype(str).str.strip().eq('').sum():,}")
-    col5.metric("Deals with flags", f"{(filtered_df['Flag Count'] > 0).sum():,}")
-
-    if snapshot_label:
-        st.caption(f"Workbook snapshot detected from the active sheet: {snapshot_label}")
-
-    am_summary = (
-        filtered_df.groupby("Asset Manager", dropna=False)
-        .agg(
-            Deals=("Deal Number", "count"),
-            Total_UPB=("Current UPB", lambda s: numeric_sum(s)),
-            Blank_Current_Comments=("This Week Comment", lambda s: s.fillna("").astype(str).str.strip().eq("").sum()),
-            Needs_Discussion=("Needs Discussion", "sum"),
-            Flagged=("Flag Count", lambda s: (s > 0).sum()),
-        )
-        .reset_index()
-    )
-    am_summary["Total UPB"] = am_summary["Total_UPB"].apply(metric_currency)
-    am_summary = am_summary.drop(columns=["Total_UPB"]).rename(
-        columns={
-            "Blank_Current_Comments": "Blank current comments",
-            "Needs_Discussion": "Needs discussion",
-        }
-    )
-    st.markdown("**AM workload**")
-    st.dataframe(am_summary, width="stretch", hide_index=True)
-
-    st.markdown("**Current queue**")
-    queue_cols = [
-        "Deal Number",
-        "Deal Name",
-        "Asset Manager",
-        "Current DQ Status",
-        "Current UPB",
-        "Resolution Likelihood",
-        "Expected Final Resolution",
-        "Previous Weekly Comment",
-        "This Week Comment",
-        "Flag Summary",
-    ]
-    show_cols = [col for col in queue_cols if col in filtered_df.columns]
-    st.dataframe(filtered_df[show_cols], width="stretch", hide_index=True)
-
-
-def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]]) -> pd.DataFrame | None:
-    st.subheader("Bulk update grid")
-    st.caption("Use this for fast queue clean-up. The prior comment is read-only; current-week comment is what gets prepended on export.")
-
-    default_cols = [
-        "Resolution Likelihood",
-        "Expected Resolution Type",
-        "Expected Final Resolution",
-        "Resolution Timing",
-        "Liquidity Event Timing",
-        "Pref Deal (Y/N)",
-        "Valuation Type",
-        "Previous Weekly Comment",
-        "This Week Comment",
-        "Needs Discussion",
-    ]
-    available_bulk = [col for col in default_cols if col in filtered_df.columns]
-    selected_cols = st.multiselect("Columns shown in grid", available_bulk, default=available_bulk)
-
-    grid_columns = [col for col in [*GRID_CONTEXT_HEADERS, *selected_cols] if col in filtered_df.columns]
-    editor_view = filtered_df[["_excel_row", *grid_columns]].copy()
-
-    disabled_columns = [
-        "_excel_row",
-        *GRID_CONTEXT_HEADERS,
-        "Previous Weekly Comment",
-    ]
-
-    column_config: dict[str, Any] = {
-        "Needs Discussion": st.column_config.CheckboxColumn("Needs Discussion"),
-    }
-    for field, options in picklists.items():
-        if field in editor_view.columns and field not in {"Comment Template"}:
-            column_config[field] = st.column_config.SelectboxColumn(field, options=options)
-    if "This Week Comment" in editor_view.columns:
-        column_config["This Week Comment"] = st.column_config.TextColumn("This Week Comment", width="large")
-    if "Previous Weekly Comment" in editor_view.columns:
-        column_config["Previous Weekly Comment"] = st.column_config.TextColumn("Previous Weekly Comment", width="large")
-
-    edited = st.data_editor(
-        editor_view,
-        width="stretch",
-        hide_index=True,
-        disabled=disabled_columns,
-        num_rows="fixed",
-        column_config=column_config,
-        key="bulk_editor_v3",
-    )
-
-    if st.button("Apply bulk grid changes", width="stretch"):
-        return edited
-    return None
-
-
 def main() -> None:
     st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="collapsed")
     apply_base_css()
 
-    page_left, page_right = st.columns([1.1, 4.9], gap="large")
+    left_col, right_col = st.columns([1.05, 4.95], gap="large")
 
-    with page_left:
+    with left_col:
         st.markdown('<div class="side-panel">', unsafe_allow_html=True)
-        file_bytes, workbook_name = get_active_workbook(st.container())
+        file_bytes, workbook_name = get_active_workbook()
         st.markdown("</div>", unsafe_allow_html=True)
 
     if file_bytes is None:
-        with page_right:
-            st.title("NPL deal review")
-            st.caption("Upload the latest workbook from the left control panel to begin.")
+        with right_col:
+            st.title("NPL presentation mode")
+            st.caption("Upload the latest workbook from the left panel to begin.")
         return
 
     file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -966,26 +832,25 @@ def main() -> None:
         picklists=picklists,
     )
 
-    visible_count = int((~display_df["_workbook_hidden"]).sum())
-    hidden_count = int(display_df["_workbook_hidden"].sum())
-
-    with page_left:
+    with left_col:
         st.markdown('<div class="side-panel">', unsafe_allow_html=True)
-        sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df, st.container())
+        sorted_df, comment_date, workspace_mode, selected_sort = render_left_controls(display_df)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
+    display_df = build_display_view(
+        base_deals=parsed["deals_df"],
+        editor_df=st.session_state["editor_df"],
+        property_summary=parsed["property_summary"],
+        entry_date=comment_date,
+        picklists=picklists,
+    )
 
-    with page_right:
-        if workspace_mode != "Review workspace":
-            st.title("NPL deal review")
-            st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
-            with st.expander("Workbook details", expanded=False):
-                st.caption(
-                    f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; "
-                    f"total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
-                )
+    # Re-apply filter state after editor refresh
+    with left_col:
+        sorted_df, comment_date, workspace_mode, selected_sort = render_left_controls(display_df)
 
+    with right_col:
         flash_message = st.session_state.pop("flash_message", None)
         if flash_message:
             st.success(flash_message)
@@ -994,77 +859,45 @@ def main() -> None:
             st.warning("No deals match the current filters.")
             return
 
-        if workspace_mode == "Review workspace":
-            order_label = "workbook file order" if selected_sort == "Workbook file order" else selected_sort.lower()
-            st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
-
-        render_queue_navigation(sorted_df)
+        st.caption(f"Current presentation queue: {selected_sort.lower()} · {len(sorted_df):,} deal(s) in scope")
+        render_queue_navigation(sorted_df, selected_sort)
 
         selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
         queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
         queue_total = len(sorted_df)
 
-        if workspace_mode == "Overview":
-            render_overview(sorted_df, parsed.get("snapshot_label"))
-        elif workspace_mode == "Bulk update":
-            edited_subset = render_bulk_edit(sorted_df, picklists)
-            if edited_subset is not None:
-                full_editor = st.session_state["editor_df"].set_index("_excel_row")
-                edited_lookup = edited_subset.set_index("_excel_row")
-                for row_num in edited_lookup.index:
-                    if row_num not in full_editor.index:
-                        continue
-                    for header in edited_lookup.columns:
-                        if header in {"Comment History", "Comments Preview", "Previous Weekly Comment", "Last Comment Date"}:
-                            continue
-                        if header in full_editor.columns:
-                            full_editor.loc[row_num, header] = edited_lookup.loc[row_num, header]
-                st.session_state["editor_df"] = refresh_editor_derived_fields(full_editor.reset_index(), comment_date)
-                st.success("Bulk grid changes applied in the app view.")
-                st.rerun()
-        else:
-            render_deal_header(selected, queue_position, queue_total)
-            updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
-            if updates:
-                advance_mode = updates.pop("_advance_mode", "stay")
-                st.session_state["editor_df"] = apply_detail_edit(
-                    st.session_state["editor_df"],
-                    int(selected["_excel_row"]),
-                    updates,
-                    comment_date,
-                )
-                option_rows = sorted_df["_excel_row"].tolist()
-                current_idx = option_rows.index(int(selected["_excel_row"]))
-                next_row = None
+        render_deal_header(selected, queue_position, queue_total)
+        updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
 
-                if advance_mode == "next" and current_idx < len(option_rows) - 1:
+        if updates:
+            advance_mode = updates.pop("_advance_mode", "stay")
+            st.session_state["editor_df"] = apply_detail_edit(
+                st.session_state["editor_df"],
+                int(selected["_excel_row"]),
+                updates,
+                comment_date,
+            )
+
+            option_rows = sorted_df["_excel_row"].tolist()
+            current_idx = option_rows.index(int(selected["_excel_row"]))
+            next_row = None
+
+            if advance_mode == "next" and current_idx < len(option_rows) - 1:
+                next_row = option_rows[current_idx + 1]
+            elif advance_mode == "next_same_am":
+                current_am = safe_text(selected.get("Asset Manager"))
+                for row_num in option_rows[current_idx + 1:]:
+                    row_am = safe_text(sorted_df[sorted_df["_excel_row"] == row_num].iloc[0].get("Asset Manager"))
+                    if row_am == current_am:
+                        next_row = row_num
+                        break
+                if next_row is None and current_idx < len(option_rows) - 1:
                     next_row = option_rows[current_idx + 1]
-                elif advance_mode == "next_blank":
-                    refreshed_after_save = build_display_view(
-                        base_deals=parsed["deals_df"],
-                        editor_df=st.session_state["editor_df"],
-                        property_summary=parsed["property_summary"],
-                        entry_date=comment_date,
-                        picklists=picklists,
-                    )
-                    queue_after_save = sort_deals(
-                        refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)],
-                        selected_sort,
-                    )
-                    blanks = queue_after_save[
-                        queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")
-                    ]["_excel_row"].tolist()
-                    for row_num in blanks:
-                        if row_num != int(selected["_excel_row"]):
-                            next_row = row_num
-                            break
-                    if next_row is None and current_idx < len(option_rows) - 1:
-                        next_row = option_rows[current_idx + 1]
 
-                if next_row is not None:
-                    st.session_state["selected_row"] = next_row
-                st.session_state["flash_message"] = "Deal edits saved."
-                st.rerun()
+            if next_row is not None:
+                st.session_state["selected_row"] = next_row
+            st.session_state["flash_message"] = "Deal edits saved."
+            st.rerun()
 
         changes = workbook_change_set(
             st.session_state["editor_df"],
@@ -1077,11 +910,7 @@ def main() -> None:
         summary_col, action_col = st.columns([2, 1])
         with summary_col:
             st.write(f"Pending edits in the app view: **{len(changes)} cells across {changed_deals} deal(s)**")
-            summary_parts = []
-            if queue_view != "All deals":
-                summary_parts.append(f"queue focus: {queue_view}")
-            summary_parts.append(f"order: {selected_sort.lower()}")
-            st.caption(" · ".join(summary_parts))
+            st.caption(f"order: {selected_sort.lower()}")
         with action_col:
             if st.button("Reset all app edits", width="stretch"):
                 st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
