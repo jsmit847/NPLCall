@@ -784,13 +784,11 @@ def render_review_form(
 
 
 def main() -> None:
-    st.set_page_config(page_title="NPL Deal Review", layout="wide")
+    st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="collapsed")
 
     apply_base_css()
 
-    control_col, content_col = st.columns([1.05, 4.95], gap="large")
-
-    with control_col:
+    with st.sidebar:
         file_bytes, workbook_name = get_active_workbook()
         if file_bytes is not None:
             file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -813,9 +811,8 @@ def main() -> None:
             render_controls(display_df)
 
     if st.session_state.get("workbook_bytes") is None:
-        with content_col:
-            st.title("NPL presentation mode")
-            st.caption("Upload the latest workbook from the left panel to begin.")
+        st.title("NPL presentation mode")
+        st.caption("Open the sidebar and upload the latest workbook to begin.")
         return
 
     file_bytes = st.session_state["workbook_bytes"]
@@ -840,93 +837,92 @@ def main() -> None:
 
     sorted_df, comment_date, selected_sort = get_filtered_sorted_df(display_df)
 
-    with content_col:
-        flash_message = st.session_state.pop("flash_message", None)
-        if flash_message:
-            st.success(flash_message)
+    flash_message = st.session_state.pop("flash_message", None)
+    if flash_message:
+        st.success(flash_message)
 
-        if sorted_df.empty:
-            st.warning("No deals match the current filters.")
-            return
+    if sorted_df.empty:
+        st.warning("No deals match the current filters.")
+        return
 
-        st.caption(f"Current presentation queue: {selected_sort.lower()} · {len(sorted_df):,} deal(s) in scope")
-        render_queue_navigation(sorted_df)
+    st.caption(f"Current presentation queue: {selected_sort.lower()} · {len(sorted_df):,} deal(s) in scope")
+    render_queue_navigation(sorted_df)
 
-        selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
-        queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
-        queue_total = len(sorted_df)
+    selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
+    queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
+    queue_total = len(sorted_df)
 
-        render_deal_header(selected, queue_position, queue_total)
-        updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
+    render_deal_header(selected, queue_position, queue_total)
+    updates = render_review_form(selected, picklists, parsed["properties_df"], comment_date)
 
-        if updates:
-            advance_mode = updates.pop("_advance_mode", "stay")
-            st.session_state["editor_df"] = apply_detail_edit(
-                st.session_state["editor_df"],
-                int(selected["_excel_row"]),
-                updates,
-                comment_date,
-            )
-
-            option_rows = sorted_df["_excel_row"].tolist()
-            current_idx = option_rows.index(int(selected["_excel_row"]))
-            next_row = None
-
-            if advance_mode == "next" and current_idx < len(option_rows) - 1:
-                next_row = option_rows[current_idx + 1]
-            elif advance_mode == "next_same_am":
-                current_am = safe_text(selected.get("Asset Manager"))
-                for row_num in option_rows[current_idx + 1:]:
-                    row_am = safe_text(sorted_df[sorted_df["_excel_row"] == row_num].iloc[0].get("Asset Manager"))
-                    if row_am == current_am:
-                        next_row = row_num
-                        break
-                if next_row is None and current_idx < len(option_rows) - 1:
-                    next_row = option_rows[current_idx + 1]
-
-            if next_row is not None:
-                st.session_state["selected_row"] = next_row
-            st.session_state["flash_message"] = "Deal edits saved."
-            st.rerun()
-
-        changes = workbook_change_set(
+    if updates:
+        advance_mode = updates.pop("_advance_mode", "stay")
+        st.session_state["editor_df"] = apply_detail_edit(
             st.session_state["editor_df"],
-            parsed["original_editor_values"],
+            int(selected["_excel_row"]),
+            updates,
             comment_date,
         )
-        changed_deals = len({row for row, _ in changes.keys()})
 
-        st.divider()
-        summary_col, action_col = st.columns([2, 1])
-        with summary_col:
-            st.write(f"Pending edits in the app view: **{len(changes)} cells across {changed_deals} deal(s)**")
-            st.caption(f"order: {selected_sort.lower()}")
-        with action_col:
-            if st.button("Reset all app edits", width="stretch"):
-                st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
-                st.rerun()
+        option_rows = sorted_df["_excel_row"].tolist()
+        current_idx = option_rows.index(int(selected["_excel_row"]))
+        next_row = None
 
-        updated_bytes = (
-            build_updated_workbook(
-                file_bytes=file_bytes,
-                sheet_path=parsed["deal_sheet_path"],
-                changes=changes,
-                cell_meta=parsed["cell_meta"],
-                sheet_name=parsed["deal_sheet"],
-            )
-            if changes
-            else file_bytes
+        if advance_mode == "next" and current_idx < len(option_rows) - 1:
+            next_row = option_rows[current_idx + 1]
+        elif advance_mode == "next_same_am":
+            current_am = safe_text(selected.get("Asset Manager"))
+            for row_num in option_rows[current_idx + 1:]:
+                row_am = safe_text(sorted_df[sorted_df["_excel_row"] == row_num].iloc[0].get("Asset Manager"))
+                if row_am == current_am:
+                    next_row = row_num
+                    break
+            if next_row is None and current_idx < len(option_rows) - 1:
+                next_row = option_rows[current_idx + 1]
+
+        if next_row is not None:
+            st.session_state["selected_row"] = next_row
+        st.session_state["flash_message"] = "Deal edits saved."
+        st.rerun()
+
+    changes = workbook_change_set(
+        st.session_state["editor_df"],
+        parsed["original_editor_values"],
+        comment_date,
+    )
+    changed_deals = len({row for row, _ in changes.keys()})
+
+    st.divider()
+    summary_col, action_col = st.columns([2, 1])
+    with summary_col:
+        st.write(f"Pending edits in the app view: **{len(changes)} cells across {changed_deals} deal(s)**")
+        st.caption(f"order: {selected_sort.lower()}")
+    with action_col:
+        if st.button("Reset all app edits", width="stretch"):
+            st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
+            st.rerun()
+
+    updated_bytes = (
+        build_updated_workbook(
+            file_bytes=file_bytes,
+            sheet_path=parsed["deal_sheet_path"],
+            changes=changes,
+            cell_meta=parsed["cell_meta"],
+            sheet_name=parsed["deal_sheet"],
         )
+        if changes
+        else file_bytes
+    )
 
-        quarter_label = infer_quarter_label(workbook_name, parsed.get("snapshot_label"))
-        download_name = f"{quarter_label} NPL Resolutions.xlsx"
-        st.download_button(
-            "Download updated workbook",
-            data=updated_bytes,
-            file_name=download_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width="stretch",
-        )
+    quarter_label = infer_quarter_label(workbook_name, parsed.get("snapshot_label"))
+    download_name = f"{quarter_label} NPL Resolutions.xlsx"
+    st.download_button(
+        "Download updated workbook",
+        data=updated_bytes,
+        file_name=download_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
+    )
 
 
 if __name__ == "__main__":
