@@ -63,13 +63,6 @@ def apply_base_css() -> None:
             div[data-testid="stMetricValue"] {font-size: 1.2rem !important; font-weight: 900 !important;}
             div[data-testid="stMetricLabel"] {font-size: 0.82rem !important; font-weight: 800 !important;}
 
-            .shell-grid {
-                display: grid;
-                grid-template-columns: 310px minmax(0, 1fr);
-                gap: 1rem;
-                align-items: start;
-            }
-
             .side-panel {
                 border: 1px solid #dfe6ef;
                 border-radius: 16px;
@@ -77,13 +70,6 @@ def apply_base_css() -> None:
                 background: #fbfcfe;
                 position: sticky;
                 top: 0.7rem;
-            }
-
-            .panel-caption {
-                color: #667085;
-                font-size: 0.8rem;
-                margin-top: -0.25rem;
-                margin-bottom: 0.5rem;
             }
 
             .deal-header {
@@ -310,7 +296,7 @@ def init_state(file_hash: str, parsed: dict[str, Any]) -> None:
     st.session_state["file_hash"] = file_hash
     st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
     st.session_state["selected_row"] = None
-    st.session_state.setdefault("controls_open", True)
+    st.session_state.setdefault("controls_hidden", False)
 
 
 def stash_uploaded_workbook(uploaded_file: Any) -> None:
@@ -355,55 +341,15 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
     return st.session_state.get("workbook_bytes"), st.session_state.get("workbook_name")
 
 
-def render_left_controls(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str]:
-    with st.expander("Presentation controls", expanded=st.session_state.get("controls_open", True)):
-        st.caption("Collapse this panel when you want the presentation to take more space.")
+def get_filtered_sorted_df(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str]:
+    comment_date = st.session_state.get("comment_date_input", st.session_state.get("comment_date", date.today()))
+    st.session_state["comment_date"] = comment_date
 
-        workspace_mode = "Presentation mode"
-        comment_date = st.date_input(
-            "Current week comment date",
-            value=st.session_state.get("comment_date", date.today()),
-            key="comment_date_input",
-        )
-        st.session_state["comment_date"] = comment_date
-
-        asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-
-        presentation_order = st.segmented_control(
-            "Presentation order",
-            options=["Workbook file order", "Asset Manager order"],
-            default=st.session_state.get("presentation_order_value", "Workbook file order"),
-            selection_mode="single",
-            key="presentation_order_value",
-        )
-        if not presentation_order:
-            presentation_order = "Workbook file order"
-
-        pill_options = ["All asset managers"] + asset_managers
-        am_scope = st.pills(
-            "Show deals for",
-            options=pill_options,
-            selection_mode="single",
-            default=st.session_state.get("am_scope_value", "All asset managers"),
-            key="am_scope_value",
-        )
-        if not am_scope:
-            am_scope = "All asset managers"
-
-        selected_bt = st.multiselect(
-            "Bridge / Term",
-            sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
-            key="bridge_term_multiselect",
-        )
-        selected_segment = st.multiselect(
-            "Segment",
-            sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
-            key="segment_multiselect",
-        )
-        search = st.text_input(
-            "Search deal number, name, or location",
-            key="deal_search_input",
-        )
+    presentation_order = st.session_state.get("presentation_order_value", "Workbook file order")
+    am_scope = st.session_state.get("am_scope_value", "All asset managers")
+    selected_bt = st.session_state.get("bridge_term_multiselect", [])
+    selected_segment = st.session_state.get("segment_multiselect", [])
+    search = st.session_state.get("deal_search_input", "")
 
     filtered_df = display_df.copy()
     filtered_df = filtered_df[~filtered_df["_workbook_hidden"]]
@@ -415,7 +361,7 @@ def render_left_controls(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, 
     if selected_segment:
         filtered_df = filtered_df[filtered_df["Segment"].astype(str).isin(selected_segment)]
     if search:
-        needle = search.lower()
+        needle = str(search).lower()
         filtered_df = filtered_df[
             filtered_df["Deal Number"].astype(str).str.lower().str.contains(needle)
             | filtered_df["Deal Name"].astype(str).str.lower().str.contains(needle)
@@ -424,10 +370,54 @@ def render_left_controls(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, 
 
     selected_sort = "Workbook file order" if presentation_order == "Workbook file order" else "Asset Manager / Deal"
     sorted_df = sort_deals(filtered_df, selected_sort).reset_index(drop=True)
-    return sorted_df, comment_date, workspace_mode, selected_sort
+    return sorted_df, comment_date, selected_sort
 
 
-def render_queue_navigation(sorted_df: pd.DataFrame, selected_sort: str) -> None:
+def render_left_controls(display_df: pd.DataFrame) -> None:
+    st.markdown("### Presentation controls")
+    st.caption("Hide this panel when you want the presentation to take more space.")
+
+    st.date_input(
+        "Current week comment date",
+        value=st.session_state.get("comment_date", date.today()),
+        key="comment_date_input",
+    )
+
+    asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
+
+    st.segmented_control(
+        "Presentation order",
+        options=["Workbook file order", "Asset Manager order"],
+        default=st.session_state.get("presentation_order_value", "Workbook file order"),
+        selection_mode="single",
+        key="presentation_order_value",
+    )
+
+    st.pills(
+        "Show deals for",
+        options=["All asset managers"] + asset_managers,
+        selection_mode="single",
+        default=st.session_state.get("am_scope_value", "All asset managers"),
+        key="am_scope_value",
+    )
+
+    st.multiselect(
+        "Bridge / Term",
+        sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
+        key="bridge_term_multiselect",
+    )
+    st.multiselect(
+        "Segment",
+        sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
+        key="segment_multiselect",
+    )
+    st.text_input(
+        "Search deal number, name, or location",
+        key="deal_search_input",
+    )
+
+
+def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
     option_rows = sorted_df["_excel_row"].tolist()
     if not option_rows:
         return
@@ -509,7 +499,7 @@ def render_metric_strip(selected: pd.Series) -> None:
     last_comment_date = metric_date(selected.get("Last Comment Date"))
     popover_label = f"Previous weekly comment · {last_comment_date}" if last_comment_date != "-" else "Previous weekly comment"
 
-    with st.popover(popover_label, use_container_width=True):
+    with st.popover(popover_label, width="stretch"):
         st.markdown("**Previous weekly comment**")
         st.markdown(
             f"<div class='scroll-note'>{previous_week_comment if previous_week_comment else '-'}</div>",
@@ -599,7 +589,7 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
                 display_related["Days Past Due"] = display_related["Days Past Due"].apply(
                     lambda v: f"{int(v):,}" if normalize_number(v) is not None else safe_text(v)
                 )
-            with st.popover("Property detail", use_container_width=False):
+            with st.popover("Property detail", width="content"):
                 st.dataframe(display_related, width="stretch", hide_index=True)
 
 
@@ -734,14 +724,14 @@ def render_review_form(
                 f"<div class='scroll-note'>{editable_text(selected.get('Previous Weekly Comment')) or '-'}</div>",
                 unsafe_allow_html=True,
             )
-            with st.popover("Prior history", use_container_width=True):
+            with st.popover("Prior history", width="stretch"):
                 st.text_area(
                     "Comment history",
                     editable_text(selected.get("Comment History")),
                     disabled=True,
                     height=240,
                 )
-            with st.popover("Salesforce AM comment", use_container_width=True):
+            with st.popover("Salesforce AM comment", width="stretch"):
                 st.text_area(
                     "Current Salesforce AM Comment",
                     editable_text(selected.get("Current Salesforce AM Comment")),
@@ -767,7 +757,7 @@ def render_review_form(
                 preview_text = editable_text(selected.get("Comments Preview"))
                 st.caption("No current-week comment entered yet.")
 
-            with st.popover("Comment preview", use_container_width=True):
+            with st.popover("Comment preview", width="stretch"):
                 st.text_area(
                     "Addt'l NPL Comment preview",
                     preview_text,
@@ -801,19 +791,58 @@ def main() -> None:
     st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="collapsed")
     apply_base_css()
 
-    left_col, right_col = st.columns([1.05, 4.95], gap="large")
+    st.session_state.setdefault("controls_hidden", False)
 
-    with left_col:
-        st.markdown('<div class="side-panel">', unsafe_allow_html=True)
-        file_bytes, workbook_name = get_active_workbook()
-        st.markdown("</div>", unsafe_allow_html=True)
+    if st.session_state["controls_hidden"]:
+        control_col, content_col = st.columns([0.24, 5.76], gap="large")
+    else:
+        control_col, content_col = st.columns([1.05, 4.95], gap="large")
 
-    if file_bytes is None:
-        with right_col:
+    with control_col:
+        if st.session_state["controls_hidden"]:
+            if st.button("Show panel", width="stretch", key="show_panel_btn"):
+                st.session_state["controls_hidden"] = False
+                st.rerun()
+        else:
+            st.markdown('<div class="side-panel">', unsafe_allow_html=True)
+            top_left, top_right = st.columns([1, 1])
+            with top_left:
+                st.markdown("### Controls")
+            with top_right:
+                if st.button("Hide panel", width="stretch", key="hide_panel_btn"):
+                    st.session_state["controls_hidden"] = True
+                    st.rerun()
+
+            file_bytes, workbook_name = get_active_workbook()
+            if file_bytes is not None:
+                file_hash = hashlib.md5(file_bytes).hexdigest()
+                parsed = cached_parse_workbook(file_bytes)
+                picklists = cached_picklists(parsed["deals_df"])
+
+                if st.session_state.get("file_hash") != file_hash:
+                    init_state(file_hash, parsed)
+
+                comment_date = st.session_state.get("comment_date", date.today())
+                st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
+
+                display_df = build_display_view(
+                    base_deals=parsed["deals_df"],
+                    editor_df=st.session_state["editor_df"],
+                    property_summary=parsed["property_summary"],
+                    entry_date=comment_date,
+                    picklists=picklists,
+                )
+                render_left_controls(display_df)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if st.session_state.get("workbook_bytes") is None:
+        with content_col:
             st.title("NPL presentation mode")
             st.caption("Upload the latest workbook from the left panel to begin.")
         return
 
+    file_bytes = st.session_state["workbook_bytes"]
+    workbook_name = st.session_state.get("workbook_name")
     file_hash = hashlib.md5(file_bytes).hexdigest()
     parsed = cached_parse_workbook(file_bytes)
     picklists = cached_picklists(parsed["deals_df"])
@@ -832,25 +861,9 @@ def main() -> None:
         picklists=picklists,
     )
 
-    with left_col:
-        st.markdown('<div class="side-panel">', unsafe_allow_html=True)
-        sorted_df, comment_date, workspace_mode, selected_sort = render_left_controls(display_df)
-        st.markdown("</div>", unsafe_allow_html=True)
+    sorted_df, comment_date, selected_sort = get_filtered_sorted_df(display_df)
 
-    st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
-    display_df = build_display_view(
-        base_deals=parsed["deals_df"],
-        editor_df=st.session_state["editor_df"],
-        property_summary=parsed["property_summary"],
-        entry_date=comment_date,
-        picklists=picklists,
-    )
-
-    # Re-apply filter state after editor refresh
-    with left_col:
-        sorted_df, comment_date, workspace_mode, selected_sort = render_left_controls(display_df)
-
-    with right_col:
+    with content_col:
         flash_message = st.session_state.pop("flash_message", None)
         if flash_message:
             st.success(flash_message)
@@ -860,7 +873,7 @@ def main() -> None:
             return
 
         st.caption(f"Current presentation queue: {selected_sort.lower()} · {len(sorted_df):,} deal(s) in scope")
-        render_queue_navigation(sorted_df, selected_sort)
+        render_queue_navigation(sorted_df)
 
         selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
         queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
