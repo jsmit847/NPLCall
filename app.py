@@ -433,6 +433,9 @@ def apply_base_css() -> None:
                 position: sticky;
                 top: 0.75rem;
             }
+            [data-testid="collapsedControl"] {display: none !important;}
+            [data-testid="stSidebar"] {display: none !important;}
+            section[data-testid="stSidebar"] {display: none !important;}
             header, footer {visibility: hidden;}
         </style>
         """,
