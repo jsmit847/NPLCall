@@ -712,102 +712,86 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 
 
 
-def render_review_controls(display_df: pd.DataFrame, *, prefix: str = "") -> dict[str, Any]:
-    asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-
-    workspace_mode = st.radio(
-        "Workspace",
-        ["Review workspace", "Overview", "Bulk update"],
-        index=0,
-        key=f"{prefix}workspace_mode_radio",
-    )
-    comment_date = st.date_input(
-        "Current week comment date",
-        value=st.session_state.get("comment_date", date.today()),
-        key=f"{prefix}comment_date_input",
-    )
-    show_hidden = st.checkbox(
-        "Include workbook-hidden rows",
-        value=False,
-        key=f"{prefix}show_hidden_checkbox",
-    )
-    presentation_order = st.selectbox(
-        "How should the presentation be ordered?",
-        ["Workbook file order", "Asset Manager order"],
-        index=0,
-        key=f"{prefix}presentation_order_select",
-        help="Choose whether to present the deals exactly in workbook order, or grouped by Asset Manager first.",
-    )
-    am_scope = st.selectbox(
-        "Which deals should be included?",
-        ["All asset managers"] + asset_managers,
-        index=0,
-        key=f"{prefix}am_scope_select",
-        help="Pick one Asset Manager here to review only that AM's deals.",
-    )
-    selected_bt = st.multiselect(
-        "Bridge / Term",
-        sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
-        key=f"{prefix}bridge_term_multiselect",
-    )
-    selected_segment = st.multiselect(
-        "Segment",
-        sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
-        key=f"{prefix}segment_multiselect",
-    )
-    queue_view = st.selectbox(
-        "Queue focus",
-        ["All deals", "Missing current-week comment", "Needs discussion", "Has data flags"],
-        key=f"{prefix}queue_focus_select",
-    )
-    manual_sort = st.selectbox(
-        "Secondary sort",
-        ["Use presentation order only", "Deal Name", "UPB desc", "Flag count desc", "Last comment date desc"],
-        index=0,
-        key=f"{prefix}secondary_sort_select",
-    )
-    search = st.text_input(
-        "Search deal number, name, or location",
-        key=f"{prefix}deal_search_input",
-    )
-    return {
-        "workspace_mode": workspace_mode,
-        "comment_date": comment_date,
-        "show_hidden": show_hidden,
-        "presentation_order": presentation_order,
-        "am_scope": am_scope,
-        "selected_bt": selected_bt,
-        "selected_segment": selected_segment,
-        "queue_view": queue_view,
-        "manual_sort": manual_sort,
-        "search": search,
-    }
-
-
-
 def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
     with st.sidebar:
-        st.header("Review filters")
-        st.caption("If your sidebar is hidden, use the same controls in the main page section below.")
-        sidebar_controls = render_review_controls(display_df, prefix="sidebar_")
+        st.header("Review controls")
+        st.caption("Choose the presentation order and AM scope here before stepping through deals.")
 
-    st.markdown("### Review controls")
-    st.caption("These controls are duplicated here on purpose so they are always visible, even when the sidebar is collapsed.")
-    main_controls = render_review_controls(display_df, prefix="main_")
+        workspace_mode = st.radio(
+            "Workspace",
+            ["Review workspace", "Overview", "Bulk update"],
+            index=0,
+            key="workspace_mode_radio",
+        )
+        comment_date = st.date_input(
+            "Current week comment date",
+            value=st.session_state.get("comment_date", date.today()),
+            key="comment_date_input",
+        )
+        st.session_state["comment_date"] = comment_date
+        show_hidden = st.checkbox(
+            "Include workbook-hidden rows",
+            value=False,
+            key="show_hidden_checkbox",
+        )
 
-    controls = main_controls
+        asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
 
-    workspace_mode = controls["workspace_mode"]
-    comment_date = controls["comment_date"]
-    st.session_state["comment_date"] = comment_date
-    show_hidden = controls["show_hidden"]
-    am_scope = controls["am_scope"]
-    selected_bt = controls["selected_bt"]
-    selected_segment = controls["selected_segment"]
-    queue_view = controls["queue_view"]
-    manual_sort = controls["manual_sort"]
-    search = controls["search"]
-    presentation_order = controls["presentation_order"]
+        st.markdown("**Presentation order**")
+        presentation_order = st.select_slider(
+            "Presentation order",
+            options=["Workbook file order", "Asset Manager order"],
+            value=st.session_state.get("presentation_order_slider", "Workbook file order"),
+            key="presentation_order_slider",
+            help="Slide this to choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
+        )
+
+        st.markdown("**Asset Manager scope**")
+        am_scope = st.select_slider(
+            "Included deals",
+            options=["All asset managers"] + asset_managers if asset_managers else ["All asset managers"],
+            value=st.session_state.get("am_scope_slider", "All asset managers") if st.session_state.get("am_scope_slider") in (["All asset managers"] + asset_managers if asset_managers else ["All asset managers"]) else "All asset managers",
+            key="am_scope_slider",
+            help="Slide to a specific Asset Manager to only review that AM's deals.",
+        )
+
+        selected_bt = st.multiselect(
+            "Bridge / Term",
+            sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
+            key="bridge_term_multiselect",
+        )
+        selected_segment = st.multiselect(
+            "Segment",
+            sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
+            key="segment_multiselect",
+        )
+        queue_view = st.selectbox(
+            "Queue focus",
+            [
+                "All deals",
+                "Missing current-week comment",
+                "Needs discussion",
+                "Has data flags",
+            ],
+            key="queue_focus_select",
+        )
+        manual_sort = st.selectbox(
+            "Secondary sort",
+            [
+                "Use presentation order only",
+                "Deal Name",
+                "UPB desc",
+                "Flag count desc",
+                "Last comment date desc",
+            ],
+            index=0,
+            key="secondary_sort_select",
+            help="Leave this on presentation order only unless you want a different secondary sort.",
+        )
+        search = st.text_input(
+            "Search deal number, name, or location",
+            key="deal_search_input",
+        )
 
     filtered_df = display_df.copy()
     if not show_hidden:
