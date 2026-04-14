@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import hashlib
@@ -7,27 +8,30 @@ from datetime import date
 from typing import Any
 from urllib.parse import quote
 
-import msal
 import pandas as pd
 import requests
 import streamlit as st
+import msal
 
 from workbook_utils import (
     COMMENT_TEMPLATE_OPTIONS,
-    COMMENT_STORAGE_FIELD,
+    CORE_FIELDS,
+    EXPORTABLE_FIELDS,
     GRID_CONTEXT_HEADERS,
     LONG_TEXT_FIELDS,
+    READONLY_CONTEXT_FIELDS,
+    SECTION_MAP,
+    COMMENT_STORAGE_FIELD,
     MANUAL_ENTRY_PICKLIST_FIELDS,
     NUMERIC_OR_TEXT_FIELDS,
-    SECTION_MAP,
     apply_detail_edit,
     build_display_view,
     build_picklists,
     build_updated_workbook,
     build_weekly_comment_text,
     editable_text,
-    format_comment_entry_date,
     format_deal_label,
+    format_comment_entry_date,
     make_editor_df,
     metric_currency,
     metric_date,
@@ -36,6 +40,7 @@ from workbook_utils import (
     normalize_number,
     parse_deal_workbook,
     refresh_editor_derived_fields,
+    row_quality_flags,
     sort_deals,
     workbook_change_set,
 )
@@ -83,14 +88,7 @@ def get_sharepoint_config() -> dict[str, str]:
         "default_drive": get_setting("SHAREPOINT_DEFAULT_DRIVE"),
         "default_folder": get_setting("SHAREPOINT_DEFAULT_FOLDER"),
     }
-    config["enabled"] = str(
-        bool(
-            config["tenant_id"]
-            and config["client_id"]
-            and config["client_secret"]
-            and config["redirect_uri"]
-        )
-    )
+    config["enabled"] = str(bool(config["tenant_id"] and config["client_id"] and config["client_secret"] and config["redirect_uri"]))
     return config
 
 
@@ -151,11 +149,7 @@ def ensure_sharepoint_login(config: dict[str, str]) -> str | None:
             return None
         clear_auth_query_params()
         if not token_result or "access_token" not in token_result:
-            error_text = (
-                token_result.get("error_description")
-                if isinstance(token_result, dict)
-                else "Unknown authentication error."
-            )
+            error_text = token_result.get("error_description") if isinstance(token_result, dict) else "Unknown authentication error."
             st.error(f"Microsoft sign-in failed: {error_text}")
             return None
         st.session_state["ms_graph_token"] = token_result
@@ -172,12 +166,7 @@ def ensure_sharepoint_login(config: dict[str, str]) -> str | None:
     return None
 
 
-def graph_get(
-    access_token: str,
-    endpoint: str,
-    params: dict[str, Any] | None = None,
-    raw: bool = False,
-):
+def graph_get(access_token: str, endpoint: str, params: dict[str, Any] | None = None, raw: bool = False):
     url = endpoint if endpoint.startswith("http") else f"{GRAPH_BASE_URL}{endpoint}"
     response = requests.get(
         url,
@@ -204,15 +193,11 @@ def cached_drive_list(access_token: str, site_id: str):
 
 @st.cache_data(show_spinner=False, ttl=120)
 def cached_children(access_token: str, drive_id: str, folder_id: str | None):
-    endpoint = f"/drives/{drive_id}/items/{folder_id}/children" if folder_id else f"/drives/{drive_id}/root/children"
-    data = graph_get(
-        access_token,
-        endpoint,
-        params={
-            "$top": 200,
-            "$select": "id,name,webUrl,lastModifiedDateTime,size,folder,file,parentReference",
-        },
-    )
+    if folder_id:
+        endpoint = f"/drives/{drive_id}/items/{folder_id}/children"
+    else:
+        endpoint = f"/drives/{drive_id}/root/children"
+    data = graph_get(access_token, endpoint, params={"$top": 200, "$select": "id,name,webUrl,lastModifiedDateTime,size,folder,file,parentReference"})
     return data.get("value", [])
 
 
@@ -322,6 +307,12 @@ def apply_base_css() -> None:
                 font-weight: 950;
                 line-height: 1.05;
             }
+            .kpi-box .subvalue {
+                margin-top: 0.14rem;
+                color: #475467;
+                font-size: 0.82rem;
+                font-weight: 700;
+            }
             .kpi-comment {
                 border: 1px solid #e5e7eb;
                 border-radius: 10px;
@@ -347,6 +338,11 @@ def apply_base_css() -> None:
                 font-size: 0.86rem;
                 font-weight: 700;
                 margin: 0.1rem 0 0.35rem 0;
+            }
+            .presenter-text {
+                font-size: 0.96rem;
+                line-height: 1.35;
+                white-space: pre-wrap;
             }
             .snapshot-grid {
                 display: grid;
@@ -412,6 +408,23 @@ def apply_base_css() -> None:
                 background: #f9fafb;
                 font-weight: 600;
             }
+            .sidebar-panel {
+                border: 1px solid #dfe6ef;
+                border-radius: 12px;
+                padding: 0.7rem 0.75rem;
+                margin-bottom: 0.8rem;
+                background: #fbfcfe;
+            }
+            .sidebar-panel-title {
+                font-size: 0.82rem;
+                font-weight: 900;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                margin-bottom: 0.45rem;
+                color: #344054;
+            }
+            .stTabs [data-baseweb="tab-list"] {gap: 0.25rem;}
+            .stTabs [data-baseweb="tab"] {padding-top: 0.35rem; padding-bottom: 0.35rem;}
             header, footer {visibility: hidden;}
         </style>
         """,
@@ -425,15 +438,19 @@ def safe_text(value: Any) -> str:
 
 
 def infer_quarter_label(workbook_name: str | None, snapshot_label: str | None) -> str:
-    name = (workbook_name or "").strip() or (snapshot_label or "").strip()
-    patterns = [r"(\b[1-4]Q\d{2}\b)", r"(\b[1-4]Q\d{4}\b)"]
+    name = (workbook_name or "").strip()
+    patterns = [
+        r"(\b[1-4]Q\d{2}\b)",
+        r"(\b[1-4]Q\d{4}\b)",
+    ]
     for pattern in patterns:
-        match = re.search(pattern, name, flags=re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+        m = re.search(pattern, name, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
     today = date.today()
-    quarter = ((today.month - 1) // 3) + 1
-    return f"{quarter}Q{str(today.year)[-2:]}"
+    q = ((today.month - 1) // 3) + 1
+    yy = str(today.year)[-2:]
+    return f"{q}Q{yy}"
 
 
 def field_options(field: str, picklists: dict[str, list[str]], current_value: str) -> list[str]:
@@ -446,7 +463,9 @@ def field_options(field: str, picklists: dict[str, list[str]], current_value: st
 
 def selected_index(options: list[str], current_value: str) -> int:
     current = (current_value or "").strip()
-    return options.index(current) if current in options else 0
+    if current in options:
+        return options.index(current)
+    return 0
 
 
 def numeric_sum(series: pd.Series) -> float:
@@ -472,7 +491,13 @@ def stash_uploaded_workbook(uploaded_file: Any) -> None:
 
 
 def clear_uploaded_workbook() -> None:
-    for key in ["workbook_bytes", "workbook_name", "file_hash", "editor_df", "selected_row"]:
+    for key in [
+        "workbook_bytes",
+        "workbook_name",
+        "file_hash",
+        "editor_df",
+        "selected_row",
+    ]:
         st.session_state.pop(key, None)
 
 
@@ -482,9 +507,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
         return None, None
 
     token_info = st.session_state.get("ms_graph_token", {})
-    account_name = (token_info.get("id_token_claims") or {}).get("name") or (
-        token_info.get("id_token_claims") or {}
-    ).get("preferred_username")
+    account_name = (token_info.get("id_token_claims") or {}).get("name") or (token_info.get("id_token_claims") or {}).get("preferred_username")
     if account_name:
         st.caption(f"Signed in as {account_name}")
     if st.button("Sign out of Microsoft", width="stretch"):
@@ -512,13 +535,20 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
         st.session_state["sharepoint_current_folder_id"] = None
         st.session_state["sharepoint_current_folder_name"] = "Root"
         st.session_state["sharepoint_folder_stack"] = []
+        if config.get("default_folder"):
+            try:
+                folder_meta = cached_item_by_path(access_token, drive_options[default_drive_name], config["default_folder"])
+                if folder_meta.get("folder") is not None:
+                    st.session_state["sharepoint_current_folder_id"] = folder_meta["id"]
+                    st.session_state["sharepoint_current_folder_name"] = folder_meta["name"]
+                    st.session_state["sharepoint_folder_stack"] = [{"id": None, "name": "Root"}]
+            except Exception:
+                pass
 
     selected_drive_name = st.selectbox(
         "SharePoint library",
         list(drive_options.keys()),
-        index=list(drive_options.keys()).index(
-            st.session_state.get("sharepoint_selected_drive_name", default_drive_name)
-        ),
+        index=list(drive_options.keys()).index(st.session_state.get("sharepoint_selected_drive_name", default_drive_name)),
         key="sharepoint_drive_name_select",
     )
     selected_drive_id = drive_options[selected_drive_name]
@@ -528,6 +558,15 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
         st.session_state["sharepoint_current_folder_id"] = None
         st.session_state["sharepoint_current_folder_name"] = "Root"
         st.session_state["sharepoint_folder_stack"] = []
+        if config.get("default_folder"):
+            try:
+                folder_meta = cached_item_by_path(access_token, selected_drive_id, config["default_folder"])
+                if folder_meta.get("folder") is not None:
+                    st.session_state["sharepoint_current_folder_id"] = folder_meta["id"]
+                    st.session_state["sharepoint_current_folder_name"] = folder_meta["name"]
+                    st.session_state["sharepoint_folder_stack"] = [{"id": None, "name": "Root"}]
+            except Exception:
+                pass
         st.rerun()
 
     current_folder_id = st.session_state.get("sharepoint_current_folder_id")
@@ -538,7 +577,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
     st.caption(f"Site: {site.get('displayName') or config['site_path']}")
     st.caption(f"Folder: {breadcrumb}")
 
-    nav_cols = st.columns(2)
+    nav_cols = st.columns([1, 1])
     with nav_cols[0]:
         if st.button("Up one folder", width="stretch", disabled=not current_folder_id and not folder_stack):
             if folder_stack:
@@ -573,11 +612,7 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
 
     folder_names = [item["name"] for item in folders]
     if folder_names:
-        next_folder = st.selectbox(
-            "Open folder",
-            [""] + folder_names,
-            key=f"folder_select_{selected_drive_id}_{current_folder_id or 'root'}",
-        )
+        next_folder = st.selectbox("Open folder", [""] + folder_names, key=f"folder_select_{selected_drive_id}_{current_folder_id or 'root'}")
         if next_folder:
             chosen = next(item for item in folders if item["name"] == next_folder)
             st.session_state["sharepoint_folder_stack"] = folder_stack + [{"id": current_folder_id, "name": current_folder_name}]
@@ -590,7 +625,10 @@ def render_sharepoint_browser(config: dict[str, str]) -> tuple[bytes | None, str
         st.warning("No .xlsx files are visible in this folder right now.")
         return None, None
 
-    file_labels = [f"{item['name']} · modified {item.get('lastModifiedDateTime', '')[:10]}" for item in excel_files]
+    file_labels = [
+        f"{item['name']} · modified {item.get('lastModifiedDateTime', '')[:10]}"
+        for item in excel_files
+    ]
     selected_label = st.selectbox("Workbook", file_labels, key=f"file_pick_{selected_drive_id}_{current_folder_id or 'root'}")
     selected_item = excel_files[file_labels.index(selected_label)]
 
@@ -635,7 +673,11 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
                 return None, None
             return workbook_bytes, workbook_name
 
-        sidebar_upload = st.file_uploader("Upload / replace workbook", type=["xlsx"], key="sidebar_workbook_upload")
+        sidebar_upload = st.file_uploader(
+            "Upload / replace workbook",
+            type=["xlsx"],
+            key="sidebar_workbook_upload",
+        )
         if sidebar_upload is not None:
             stash_uploaded_workbook(sidebar_upload)
             st.session_state["workbook_source"] = "Upload"
@@ -643,7 +685,11 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
     if st.session_state.get("workbook_bytes") is None:
         st.markdown("### Upload workbook")
         st.write("Choose the latest NPL workbook to open the review workspace.")
-        main_upload = st.file_uploader("Select workbook", type=["xlsx"], key="main_workbook_upload")
+        main_upload = st.file_uploader(
+            "Select workbook",
+            type=["xlsx"],
+            key="main_workbook_upload",
+        )
         if main_upload is not None:
             stash_uploaded_workbook(main_upload)
             st.session_state["workbook_source"] = "Upload"
@@ -652,7 +698,11 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 
     with st.expander("Change workbook", expanded=False):
         st.caption("Use this only when you want to swap to a different weekly file.")
-        replacement = st.file_uploader("Replace current workbook", type=["xlsx"], key="replace_workbook_upload")
+        replacement = st.file_uploader(
+            "Replace current workbook",
+            type=["xlsx"],
+            key="replace_workbook_upload",
+        )
         if replacement is not None:
             stash_uploaded_workbook(replacement)
             st.session_state["workbook_source"] = "Upload"
@@ -663,68 +713,101 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 
 def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
     with st.sidebar:
-        st.divider()
         st.header("Review filters")
-        workspace_mode = st.radio("Workspace", ["Review workspace", "Overview", "Bulk update"], index=0)
+        workspace_mode = st.radio(
+            "Workspace",
+            ["Review workspace", "Overview", "Bulk update"],
+            index=0,
+            key="workspace_mode_radio",
+        )
         comment_date = st.date_input(
             "Current week comment date",
             value=st.session_state.get("comment_date", date.today()),
+            key="comment_date_input",
         )
         st.session_state["comment_date"] = comment_date
-        show_hidden = st.checkbox("Include workbook-hidden rows", value=False)
+        show_hidden = st.checkbox("Include workbook-hidden rows", value=False, key="show_hidden_checkbox")
 
-        asset_managers = sorted(
-            [x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x]
+        asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
+
+        st.markdown(
+            """
+            <div class="sidebar-panel">
+                <div class="sidebar-panel-title">Presentation order</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        st.markdown("**Asset Manager review**")
+        presentation_order = st.selectbox(
+            "How should the presentation be ordered?",
+            [
+                "Workbook file order",
+                "Asset Manager order",
+            ],
+            index=0,
+            key="presentation_order_select",
+            help="Choose whether to present the deals exactly in workbook order, or grouped by Asset Manager first.",
+        )
+
+        st.markdown(
+            """
+            <div class="sidebar-panel">
+                <div class="sidebar-panel-title">Asset Manager scope</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         am_scope = st.selectbox(
-            "Show deals for",
+            "Which deals should be included?",
             ["All asset managers"] + asset_managers,
             index=0,
-            help="Choose one AM here to only review that AM's loans.",
             key="am_scope_select",
-        )
-        review_order = st.radio(
-            "Queue order",
-            ["Workbook file order", "Asset Manager order"],
-            index=0,
-            help="Choose whether to keep the uploaded workbook order or review grouped by Asset Manager.",
-            key="review_order_radio",
+            help="Pick one Asset Manager here to review only that AM's deals.",
         )
 
         selected_bt = st.multiselect(
             "Bridge / Term",
             sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
+            key="bridge_term_multiselect",
         )
         selected_segment = st.multiselect(
             "Segment",
             sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
+            key="segment_multiselect",
         )
         queue_view = st.selectbox(
             "Queue focus",
-            ["All deals", "Missing current-week comment", "Needs discussion", "Has data flags"],
-        )
-        sort_mode = st.selectbox(
-            "Sort queue",
             [
-                "Workbook file order",
-                "Asset Manager -> Deal",
+                "All deals",
+                "Missing current-week comment",
+                "Needs discussion",
+                "Has data flags",
+            ],
+            key="queue_focus_select",
+        )
+
+        manual_sort = st.selectbox(
+            "Secondary sort",
+            [
+                "Use presentation order only",
                 "Deal Name",
                 "UPB desc",
                 "Flag count desc",
                 "Last comment date desc",
             ],
-            index=0 if review_order == "Workbook file order" else 1,
-            help="This is the secondary sort. Queue order above is the main presentation choice.",
-            key="sort_mode_select",
+            index=0,
+            key="secondary_sort_select",
+            help="Leave this on presentation order only unless you want a different sort inside the chosen queue.",
         )
-        search = st.text_input("Search deal number, name, or location")
+        search = st.text_input("Search deal number, name, or location", key="deal_search_input")
 
     filtered_df = display_df.copy()
     if not show_hidden:
         filtered_df = filtered_df[~filtered_df["_workbook_hidden"]]
+
     if am_scope != "All asset managers":
         filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).eq(am_scope)]
+
     if selected_bt:
         filtered_df = filtered_df[filtered_df["Bridge / Term"].astype(str).isin(selected_bt)]
     if selected_segment:
@@ -744,20 +827,21 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
     elif queue_view == "Has data flags":
         filtered_df = filtered_df[filtered_df["Flag Count"] > 0]
 
-    sort_lookup = {
-        "Workbook file order": "Workbook file order",
-        "Asset Manager -> Deal": "Asset Manager / Deal",
-        "Deal Name": "Deal Name",
-        "UPB desc": "UPB desc",
-        "Flag count desc": "Flag count desc",
-        "Last comment date desc": "Last comment date desc",
-    }
-    selected_sort = sort_mode
-    if review_order == "Workbook file order":
+    if presentation_order == "Workbook file order":
         selected_sort = "Workbook file order"
-    elif review_order == "Asset Manager order" and sort_mode == "Workbook file order":
-        selected_sort = "Asset Manager -> Deal"
-    sorted_df = sort_deals(filtered_df, sort_lookup[selected_sort]).reset_index(drop=True)
+    else:
+        selected_sort = "Asset Manager / Deal"
+
+    if manual_sort == "Deal Name":
+        selected_sort = "Deal Name"
+    elif manual_sort == "UPB desc":
+        selected_sort = "UPB desc"
+    elif manual_sort == "Flag count desc":
+        selected_sort = "Flag count desc"
+    elif manual_sort == "Last comment date desc":
+        selected_sort = "Last comment date desc"
+
+    sorted_df = sort_deals(filtered_df, selected_sort).reset_index(drop=True)
     return sorted_df, comment_date, queue_view, workspace_mode, selected_sort
 
 
@@ -765,8 +849,10 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
     option_rows = sorted_df["_excel_row"].tolist()
     if not option_rows:
         return
+
     if st.session_state.get("selected_row") not in option_rows:
         st.session_state["selected_row"] = option_rows[0]
+
     current_idx = option_rows.index(st.session_state["selected_row"])
 
     nav1, nav2, nav3 = st.columns([1, 1, 5])
@@ -782,16 +868,18 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
         selected_row = st.selectbox(
             "Deal queue",
             option_rows,
-            format_func=lambda row_num: format_deal_label(
-                sorted_df[sorted_df["_excel_row"] == row_num].iloc[0]
-            ),
+            format_func=lambda row_num: format_deal_label(sorted_df[sorted_df["_excel_row"] == row_num].iloc[0]),
             index=option_rows.index(st.session_state["selected_row"]),
+            key="deal_queue_select",
         )
         st.session_state["selected_row"] = selected_row
 
 
 def render_deal_header(selected: pd.Series, queue_position: int, queue_total: int) -> None:
-    subtitle = f"{safe_text(selected.get('Location'))} · {safe_text(selected.get('Bridge / Term'))} · Queue {queue_position} of {queue_total}"
+    subtitle = (
+        f"{safe_text(selected.get('Location'))} · {safe_text(selected.get('Bridge / Term'))} · "
+        f"Queue {queue_position} of {queue_total}"
+    )
     st.markdown(
         f"""
         <div class="deal-header">
@@ -809,17 +897,21 @@ def render_deal_header(selected: pd.Series, queue_position: int, queue_total: in
 
 def render_metric_strip(selected: pd.Series) -> None:
     items = [
-        ("UPB", metric_currency(selected.get("Current UPB"))),
-        ("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation"))),
-        ("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV"))),
-        ("ARV", metric_currency(selected.get("Salesforce ARV"))),
-        ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV"))),
-        ("DQ", safe_text(selected.get("Current DQ Status"))),
-        ("Last comment date", metric_date(selected.get("Last Comment Date"))),
+        ("UPB", metric_currency(selected.get("Current UPB")), ""),
+        ("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")), ""),
+        ("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")), ""),
+        ("ARV", metric_currency(selected.get("Salesforce ARV")), ""),
+        ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")), ""),
+        ("DQ", safe_text(selected.get("Current DQ Status")), ""),
+        ("Last comment date", metric_date(selected.get("Last Comment Date")), ""),
     ]
     html = ["<div class='kpi-grid'>"]
-    for label, value in items:
-        html.append(f"<div class='kpi-box'><div class='label'>{label}</div><div class='value'>{value}</div></div>")
+    for label, value, subvalue in items:
+        html.append(
+            f"<div class='kpi-box'><div class='label'>{label}</div><div class='value'>{value}</div>"
+            + (f"<div class='subvalue'>{subvalue}</div>" if subvalue else "")
+            + "</div>"
+        )
     html.append("</div>")
     st.markdown("".join(html), unsafe_allow_html=True)
     st.markdown(
@@ -840,9 +932,7 @@ def render_status_chips(selected: pd.Series) -> None:
     ]:
         value = safe_text(selected.get(field))
         if value != "-":
-            chip_text.append(
-                f"<span class='status-chip'>{field.replace('Current ', '').replace('Expected ', '').replace('Timing', 'Tm')}: {value}</span>"
-            )
+            chip_text.append(f"<span class='status-chip'>{field.replace('Current ', '').replace('Expected ', '').replace('Timing', 'Tm')}: {value}</span>")
     if chip_text:
         st.markdown("".join(chip_text), unsafe_allow_html=True)
 
@@ -865,6 +955,7 @@ def render_context_column(selected: pd.Series) -> None:
     render_small_kv_card("Maturity", metric_date(selected.get("Maturity Date")))
     render_small_kv_card("Next payment", metric_date(selected.get("Next Payment Date")))
     render_small_kv_card("Convention", selected.get("MBA Loan List Convention"))
+
     if selected.get("Flag Count", 0) > 0:
         st.warning(selected.get("Flag Summary") or "This deal has data quality flags.")
     else:
@@ -876,7 +967,9 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
         units = normalize_number(selected.get("Property Units"))
         units_text = f"{int(units):,}" if units is not None else "-"
         st.caption(
-            f"Property roll-up: {int(selected.get('Property Count', 0))} properties · Units {units_text} · Max DPD {safe_text(selected.get('Max Days Past Due'))}"
+            f"Property roll-up: {int(selected.get('Property Count', 0))} properties"
+            f" · Units {units_text}"
+            f" · Max DPD {safe_text(selected.get('Max Days Past Due'))}"
         )
 
     if not properties_df.empty and "Deal Number" in properties_df.columns:
@@ -918,25 +1011,16 @@ def editable_field_input(field: str, current_value: str, picklists: dict[str, li
         custom_option = "Type custom value"
         select_options = options + ([custom_option] if custom_option not in options else [])
         default_index = selected_index(select_options, current_value if current_value in select_options else custom_option)
-        selected_option = st.selectbox(
-            f"{field} options",
-            select_options,
-            index=default_index,
-            key=f"{field}_select_{abs(hash((field, current_value)))}",
-        )
+        selected_option = st.selectbox(f"{field} options", select_options, index=default_index, key=f"{field}_select_{abs(hash((field, current_value)))}")
         if selected_option == custom_option:
-            return st.text_input(field, current_value, key=f"{field}_custom_{abs(hash((field, current_value, 'custom')))}")
+            typed_value = st.text_input(field, current_value, key=f"{field}_custom_{abs(hash((field, current_value, 'custom')))}")
+            return typed_value
         return selected_option
     if field in picklists:
         options = field_options(field, picklists, current_value)
         return st.selectbox(field, options, index=selected_index(options, current_value))
     if field in NUMERIC_OR_TEXT_FIELDS:
-        typed_value = st.text_input(
-            field,
-            normalize_money_text(current_value),
-            placeholder="$0",
-            help="Dollar values are normalized to whole dollars on save.",
-        )
+        typed_value = st.text_input(field, normalize_money_text(current_value), placeholder="$0", help="Dollar values are normalized to whole dollars on save.")
         preview = normalize_money_text(typed_value)
         if preview and preview != typed_value.strip():
             st.caption(f"Formatted value: {preview}")
@@ -985,17 +1069,25 @@ def render_snapshot_grid(selected: pd.Series) -> None:
     for section_title, rows in sections:
         html_parts.append(f"<div class='snapshot-card'><div class='snapshot-section-title'>{section_title}</div>")
         for label, value in rows:
-            html_parts.append(f"<div class='snapshot-row'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>")
+            html_parts.append(
+                f"<div class='snapshot-row'><div class='snapshot-label'>{label}</div><div class='snapshot-value'>{value}</div></div>"
+            )
         html_parts.append("</div>")
     html_parts.append("</div>")
     st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
-def render_review_form(selected: pd.Series, picklists: dict[str, list[str]], properties_df: pd.DataFrame, comment_date: date) -> dict[str, Any] | None:
+def render_review_form(
+    selected: pd.Series,
+    picklists: dict[str, list[str]],
+    properties_df: pd.DataFrame,
+    comment_date: date,
+) -> dict[str, Any] | None:
     render_metric_strip(selected)
     render_status_chips(selected)
     with st.form(f"detail_form_{int(selected['_excel_row'])}"):
         updates: dict[str, Any] = {}
+
         st.markdown("<div class='presenter-panel'>", unsafe_allow_html=True)
         st.markdown("<div class='presenter-section-title'>Deal review snapshot</div>", unsafe_allow_html=True)
         render_snapshot_grid(selected)
@@ -1003,10 +1095,15 @@ def render_review_form(selected: pd.Series, picklists: dict[str, list[str]], pro
         render_property_summary(selected, properties_df)
 
         left, middle, right = st.columns([0.95, 1.35, 1.35])
+
         with left:
             st.subheader("Context")
             render_context_column(selected)
-            updates["Needs Discussion"] = st.checkbox("Needs discussion", value=bool(selected.get("Needs Discussion", False)))
+            updates["Needs Discussion"] = st.checkbox(
+                "Needs discussion",
+                value=bool(selected.get("Needs Discussion", False)),
+            )
+
         with middle:
             st.subheader("Manual updates")
             for section_title, fields in SECTION_MAP.items():
@@ -1016,6 +1113,7 @@ def render_review_form(selected: pd.Series, picklists: dict[str, list[str]], pro
                 st.markdown(f"**{section_title}**")
                 for field in present_fields:
                     updates[field] = editable_field_input(field, editable_text(selected.get(field)), picklists)
+
         with right:
             st.subheader("Weekly comments")
             st.text_area(
@@ -1025,9 +1123,20 @@ def render_review_form(selected: pd.Series, picklists: dict[str, list[str]], pro
                 height=90,
             )
             with st.expander("Full prior comment history", expanded=False):
-                st.text_area("Comment history", editable_text(selected.get("Comment History")), disabled=True, height=220)
+                st.text_area(
+                    "Comment history",
+                    editable_text(selected.get("Comment History")),
+                    disabled=True,
+                    height=220,
+                )
             with st.expander("Salesforce AM comment", expanded=False):
-                st.text_area("Current Salesforce AM Comment", editable_text(selected.get("Current Salesforce AM Comment")), disabled=True, height=220)
+                st.text_area(
+                    "Current Salesforce AM Comment",
+                    editable_text(selected.get("Current Salesforce AM Comment")),
+                    disabled=True,
+                    height=220,
+                )
+
             template_options = field_options("Comment Template", {"Comment Template": COMMENT_TEMPLATE_OPTIONS}, "")
             comment_template = st.selectbox("Quick comment helper", template_options, index=0)
             current_week = st.text_area(
@@ -1038,10 +1147,7 @@ def render_review_form(selected: pd.Series, picklists: dict[str, list[str]], pro
             )
             built_comment = build_weekly_comment_text(current_week, comment_template)
             updates["This Week Comment"] = built_comment
-            st.caption(
-                f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}"
-                if built_comment else "No current-week comment entered yet."
-            )
+            st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}" if built_comment else "No current-week comment entered yet.")
             st.text_area(
                 "Addt'l NPL Comment preview",
                 editable_text(selected.get("Comments Preview")) if not built_comment else f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip(),
@@ -1059,12 +1165,17 @@ def render_review_form(selected: pd.Series, picklists: dict[str, list[str]], pro
             submitted_next_blank = st.form_submit_button("Apply edits + next blank comment", width="stretch")
         st.markdown("</div>", unsafe_allow_html=True)
         if submitted or submitted_next or submitted_next_blank:
-            updates["_advance_mode"] = "next" if submitted_next else ("next_blank" if submitted_next_blank else "stay")
+            if submitted_next:
+                updates["_advance_mode"] = "next"
+            elif submitted_next_blank:
+                updates["_advance_mode"] = "next_blank"
+            else:
+                updates["_advance_mode"] = "stay"
             return updates
     return None
 
 
-def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None) -> None:
+def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None, picklists: dict[str, list[str]]) -> None:
     st.subheader("Portfolio overview")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Deals in view", f"{len(filtered_df):,}")
@@ -1072,13 +1183,65 @@ def render_overview(filtered_df: pd.DataFrame, snapshot_label: str | None) -> No
     col3.metric("Asset Managers", f"{filtered_df['Asset Manager'].nunique():,}")
     col4.metric("Blank current comments", f"{filtered_df['This Week Comment'].fillna('').astype(str).str.strip().eq('').sum():,}")
     col5.metric("Deals with flags", f"{(filtered_df['Flag Count'] > 0).sum():,}")
+
     if snapshot_label:
         st.caption(f"Workbook snapshot detected from the active sheet: {snapshot_label}")
-    st.dataframe(filtered_df, width="stretch", hide_index=True)
+
+    am_summary = (
+        filtered_df.groupby("Asset Manager", dropna=False)
+        .agg(
+            Deals=("Deal Number", "count"),
+            Total_UPB=("Current UPB", lambda s: numeric_sum(s)),
+            Blank_Current_Comments=("This Week Comment", lambda s: s.fillna("").astype(str).str.strip().eq("").sum()),
+            Needs_Discussion=("Needs Discussion", "sum"),
+            Flagged=("Flag Count", lambda s: (s > 0).sum()),
+        )
+        .reset_index()
+        .rename(columns={"Asset Manager": "Asset Manager"})
+    )
+    am_summary["Total UPB"] = am_summary["Total_UPB"].apply(metric_currency)
+    am_summary = am_summary.drop(columns=["Total_UPB"]).rename(columns={
+        "Blank_Current_Comments": "Blank current comments",
+        "Needs_Discussion": "Needs discussion",
+    })
+
+    st.markdown("**AM workload**")
+    st.dataframe(am_summary, width="stretch", hide_index=True)
+
+    qos_findings = []
+    valuation_values = set(filtered_df.get("Valuation Type", pd.Series(dtype=str)).dropna().astype(str))
+    if "Drive By BPO" in valuation_values and "Drive-By BPO" in valuation_values:
+        qos_findings.append("Valuation Type has inconsistent variants for Drive-By BPO; a controlled picklist helps keep exports uniform.")
+    fcl_values = set(filtered_df.get("FCL Needed Prior to Final Resolution (Y/N)", pd.Series(dtype=str)).dropna().astype(str))
+    if len(fcl_values) > 4:
+        qos_findings.append("The FCL field is carrying mixed meanings (Y/N plus Foreclosure / Payoff / 0). The app now pushes this toward a standard dropdown.")
+    offer_values = filtered_df.get("Third Party Offer Amount", pd.Series(dtype=str)).dropna().astype(str)
+    if any(v.strip().isdigit() for v in offer_values) and any(v.strip().lower() in {"no", "yes", "n/a", "na"} for v in offer_values):
+        qos_findings.append("Third Party Offer Amount currently mixes numbers and yes/no text. Keeping offer note separate reduces rework during review.")
+    if qos_findings:
+        st.info("\n\n".join(qos_findings[:3]))
+
+    st.markdown("**Current queue**")
+    queue_cols = [
+        "Deal Number",
+        "Deal Name",
+        "Asset Manager",
+        "Current DQ Status",
+        "Current UPB",
+        "Resolution Likelihood",
+        "Expected Final Resolution",
+        "Previous Weekly Comment",
+        "This Week Comment",
+        "Flag Summary",
+    ]
+    show_cols = [col for col in queue_cols if col in filtered_df.columns]
+    st.dataframe(filtered_df[show_cols], width="stretch", hide_index=True)
 
 
-def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]]) -> pd.DataFrame | None:
+def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]], comment_date: date) -> pd.DataFrame | None:
     st.subheader("Bulk update grid")
+    st.caption("Use this for fast queue clean-up. The prior comment is read-only; current-week comment is what gets prepended on export.")
+
     default_cols = [
         "Resolution Likelihood",
         "Expected Resolution Type",
@@ -1093,10 +1256,19 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]])
     ]
     available_bulk = [col for col in default_cols if col in filtered_df.columns]
     selected_cols = st.multiselect("Columns shown in grid", available_bulk, default=available_bulk)
+
     grid_columns = [col for col in [*GRID_CONTEXT_HEADERS, *selected_cols] if col in filtered_df.columns]
     editor_view = filtered_df[["_excel_row", *grid_columns]].copy()
-    disabled_columns = ["_excel_row", *GRID_CONTEXT_HEADERS, "Previous Weekly Comment"]
-    column_config: dict[str, Any] = {"Needs Discussion": st.column_config.CheckboxColumn("Needs Discussion")}
+
+    disabled_columns = [
+        "_excel_row",
+        *GRID_CONTEXT_HEADERS,
+        "Previous Weekly Comment",
+    ]
+
+    column_config: dict[str, Any] = {
+        "Needs Discussion": st.column_config.CheckboxColumn("Needs Discussion"),
+    }
     for field, options in picklists.items():
         if field in editor_view.columns and field not in {"Comment Template"}:
             column_config[field] = st.column_config.SelectboxColumn(field, options=options)
@@ -1104,6 +1276,7 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]])
         column_config["This Week Comment"] = st.column_config.TextColumn("This Week Comment", width="large")
     if "Previous Weekly Comment" in editor_view.columns:
         column_config["Previous Weekly Comment"] = st.column_config.TextColumn("Previous Weekly Comment", width="large")
+
     edited = st.data_editor(
         editor_view,
         width="stretch",
@@ -1111,11 +1284,16 @@ def render_bulk_edit(filtered_df: pd.DataFrame, picklists: dict[str, list[str]])
         disabled=disabled_columns,
         num_rows="fixed",
         column_config=column_config,
-        key="bulk_editor_v4",
+        key="bulk_editor_v3",
     )
+
     if st.button("Apply bulk grid changes", width="stretch"):
         return edited
     return None
+
+
+def render_presentation_mode(selected: pd.Series, queue_position: int, queue_total: int, properties_df: pd.DataFrame) -> None:
+    return
 
 
 def main() -> None:
@@ -1133,7 +1311,9 @@ def main() -> None:
         init_state(file_hash, parsed)
 
     comment_date = st.session_state.get("comment_date", date.today())
-    st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
+    refreshed_editor = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
+    st.session_state["editor_df"] = refreshed_editor
+
     display_df = build_display_view(
         base_deals=parsed["deals_df"],
         editor_df=st.session_state["editor_df"],
@@ -1142,8 +1322,19 @@ def main() -> None:
         picklists=picklists,
     )
 
+    visible_count = int((~display_df["_workbook_hidden"]).sum())
+    hidden_count = int(display_df["_workbook_hidden"].sum())
+
     sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df)
     st.session_state["editor_df"] = refresh_editor_derived_fields(st.session_state["editor_df"], comment_date)
+
+    if workspace_mode != "Review workspace":
+        st.title("NPL deal review")
+        st.caption("Compact review workspace for live Teams screenshare, AM updates, and export back into the original workbook layout.")
+        with st.expander("Workbook details", expanded=False):
+            st.caption(
+                f"Deal sheet = {parsed['deal_sheet']}; property sheet = {parsed['property_sheet'] or 'not found'}; total deals = {len(display_df)}; workbook-visible rows = {visible_count}; workbook-hidden rows = {hidden_count}."
+            )
 
     flash_message = st.session_state.pop("flash_message", None)
     if flash_message:
@@ -1154,18 +1345,18 @@ def main() -> None:
         return
 
     if workspace_mode == "Review workspace":
-        order_label = "workbook file order" if selected_sort == "Workbook file order" else "asset manager order"
+        order_label = "workbook file order" if selected_sort == "Workbook file order" else selected_sort.lower()
         st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
 
     render_queue_navigation(sorted_df)
+
     selected = sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0]
     queue_position = sorted_df.index[sorted_df["_excel_row"] == st.session_state["selected_row"]][0] + 1
     queue_total = len(sorted_df)
-
     if workspace_mode == "Overview":
-        render_overview(sorted_df, parsed.get("snapshot_label"))
+        render_overview(sorted_df, parsed.get("snapshot_label"), picklists)
     elif workspace_mode == "Bulk update":
-        edited_subset = render_bulk_edit(sorted_df, picklists)
+        edited_subset = render_bulk_edit(sorted_df, picklists, comment_date)
         if edited_subset is not None:
             full_editor = st.session_state["editor_df"].set_index("_excel_row")
             edited_lookup = edited_subset.set_index("_excel_row")
@@ -1204,12 +1395,11 @@ def main() -> None:
                     entry_date=comment_date,
                     picklists=picklists,
                 )
-                next_blank_sort = "Workbook file order" if selected_sort == "Workbook file order" else "Asset Manager / Deal"
-                queue_after_save = sort_deals(
-                    refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)],
-                    next_blank_sort,
-                )
-                blanks = queue_after_save[queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")]["_excel_row"].tolist()
+                next_blank_sort = selected_sort
+                queue_after_save = sort_deals(refreshed_after_save[refreshed_after_save["_excel_row"].isin(option_rows)], next_blank_sort)
+                blanks = queue_after_save[
+                    queue_after_save["This Week Comment"].fillna("").astype(str).str.strip().eq("")
+                ]["_excel_row"].tolist()
                 for row_num in blanks:
                     if row_num != int(selected["_excel_row"]):
                         next_row = row_num
@@ -1221,8 +1411,13 @@ def main() -> None:
             st.session_state["flash_message"] = "Deal edits saved."
             st.rerun()
 
-    changes = workbook_change_set(st.session_state["editor_df"], parsed["original_editor_values"], comment_date)
+    changes = workbook_change_set(
+        st.session_state["editor_df"],
+        parsed["original_editor_values"],
+        comment_date,
+    )
     changed_deals = len({row for row, _ in changes.keys()})
+
     st.divider()
     summary_col, action_col = st.columns([2, 1])
     with summary_col:
@@ -1237,13 +1432,17 @@ def main() -> None:
             st.session_state["editor_df"] = make_editor_df(parsed["deals_df"])
             st.rerun()
 
-    updated_bytes = build_updated_workbook(
-        file_bytes=file_bytes,
-        sheet_path=parsed["deal_sheet_path"],
-        changes=changes,
-        cell_meta=parsed["cell_meta"],
-        sheet_name=parsed["deal_sheet"],
-    ) if changes else file_bytes
+    updated_bytes = (
+        build_updated_workbook(
+            file_bytes=file_bytes,
+            sheet_path=parsed["deal_sheet_path"],
+            changes=changes,
+            cell_meta=parsed["cell_meta"],
+            sheet_name=parsed["deal_sheet"],
+        )
+        if changes
+        else file_bytes
+    )
 
     quarter_label = infer_quarter_label(workbook_name, parsed.get("snapshot_label"))
     download_name = f"{quarter_label} NPL Resolutions.xlsx"
