@@ -55,22 +55,6 @@ def apply_base_css() -> None:
                 padding-bottom: 1rem;
                 max-width: 100%;
             }
-            [data-testid="stSidebar"] {display: none !important;}
-            [data-testid="collapsedControl"] {display: none !important;}
-            section[data-testid="stSidebar"] {display: none !important;}
-
-            h1, h2, h3 {margin-top: 0.15rem !important;}
-            div[data-testid="stMetricValue"] {font-size: 1.2rem !important; font-weight: 900 !important;}
-            div[data-testid="stMetricLabel"] {font-size: 0.82rem !important; font-weight: 800 !important;}
-
-            .side-panel {
-                border: 1px solid #dfe6ef;
-                border-radius: 16px;
-                padding: 0.9rem 0.9rem 0.8rem 0.9rem;
-                background: #fbfcfe;
-                position: sticky;
-                top: 0.7rem;
-            }
 
             .deal-header {
                 border: 1px solid #d7dbe2;
@@ -246,8 +230,6 @@ def apply_base_css() -> None:
                 font-size: 0.95rem;
                 line-height: 1.32;
             }
-
-            header, footer {visibility: hidden;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -387,9 +369,10 @@ def get_filtered_sorted_df(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date
     return sorted_df, comment_date, selected_sort
 
 
-def render_left_controls(display_df: pd.DataFrame) -> None:
+def render_controls(display_df: pd.DataFrame) -> None:
+    st.markdown("### Controls")
     with st.expander("Presentation controls", expanded=False):
-        st.caption("Open this when you want to change order or filter scope.")
+        st.caption("Open this only when you want to change order or filter scope.")
 
         st.date_input(
             "Current week comment date",
@@ -801,13 +784,13 @@ def render_review_form(
 
 
 def main() -> None:
-    st.set_page_config(page_title="NPL Deal Review", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="NPL Deal Review", layout="wide")
+
     apply_base_css()
 
     control_col, content_col = st.columns([1.05, 4.95], gap="large")
 
     with control_col:
-        st.markdown('<div class="side-panel">', unsafe_allow_html=True)
         file_bytes, workbook_name = get_active_workbook()
         if file_bytes is not None:
             file_hash = hashlib.md5(file_bytes).hexdigest()
@@ -827,8 +810,7 @@ def main() -> None:
                 entry_date=comment_date,
                 picklists=picklists,
             )
-            render_left_controls(display_df)
-        st.markdown("</div>", unsafe_allow_html=True)
+            render_controls(display_df)
 
     if st.session_state.get("workbook_bytes") is None:
         with content_col:
