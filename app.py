@@ -715,7 +715,7 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
     with st.sidebar:
         st.header("Review controls")
-        st.caption("Choose the presentation order and AM scope here before stepping through deals.")
+        st.caption("Choose the presentation order here before stepping through deals.")
 
         workspace_mode = st.radio(
             "Workspace",
@@ -735,8 +735,6 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             key="show_hidden_checkbox",
         )
 
-        asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-
         st.markdown("**Presentation order**")
         presentation_order = st.select_slider(
             "Presentation order",
@@ -744,15 +742,6 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             value=st.session_state.get("presentation_order_slider", "Workbook file order"),
             key="presentation_order_slider",
             help="Slide this to choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
-        )
-
-        st.markdown("**Asset Manager scope**")
-        am_scope = st.select_slider(
-            "Included deals",
-            options=["All asset managers"] + asset_managers if asset_managers else ["All asset managers"],
-            value=st.session_state.get("am_scope_slider", "All asset managers") if st.session_state.get("am_scope_slider") in (["All asset managers"] + asset_managers if asset_managers else ["All asset managers"]) else "All asset managers",
-            key="am_scope_slider",
-            help="Slide to a specific Asset Manager to only review that AM's deals.",
         )
 
         selected_bt = st.multiselect(
@@ -788,10 +777,9 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             key="secondary_sort_select",
             help="Leave this on presentation order only unless you want a different secondary sort.",
         )
-        search = st.text_input(
-            "Search deal number, name, or location",
-            key="deal_search_input",
-        )
+
+    am_scope = st.session_state.get("am_scope_value", "All asset managers")
+    search = st.session_state.get("deal_search_input", "")
 
     filtered_df = display_df.copy()
     if not show_hidden:
@@ -837,13 +825,16 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
 def render_queue_filter_bar(display_df: pd.DataFrame) -> None:
     asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
 
-    left, right = st.columns([2.2, 3.8], gap="small")
+    left, right = st.columns([2.3, 3.7], gap="small")
     with left:
-        st.pills(
-            "Show deals for",
-            options=["All asset managers"] + asset_managers,
-            selection_mode="single",
-            default=st.session_state.get("am_scope_value", "All asset managers"),
+        options = ["All asset managers"] + asset_managers
+        current = st.session_state.get("am_scope_value", "All asset managers")
+        if current not in options:
+            current = "All asset managers"
+        st.selectbox(
+            "Asset Manager",
+            options,
+            index=options.index(current),
             key="am_scope_value",
         )
     with right:
@@ -851,6 +842,7 @@ def render_queue_filter_bar(display_df: pd.DataFrame) -> None:
             "Search deal number, name, or location",
             key="deal_search_input",
         )
+
 
 
 def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
@@ -1358,6 +1350,13 @@ def main() -> None:
     if workspace_mode == "Review workspace":
         order_label = "workbook file order" if selected_sort == "Workbook file order" else selected_sort.lower()
         st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
+
+    render_queue_filter_bar(display_df)
+    sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df)
+
+    if sorted_df.empty:
+        st.warning("No deals match the current filters.")
+        return
 
     render_queue_navigation(sorted_df)
 
