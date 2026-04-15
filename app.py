@@ -397,14 +397,6 @@ def render_controls(display_df: pd.DataFrame) -> None:
             key="presentation_order_value",
         )
 
-        st.pills(
-            "Show deals for",
-            options=["All asset managers"] + asset_managers,
-            selection_mode="single",
-            default=st.session_state.get("am_scope_value", "All asset managers"),
-            key="am_scope_value",
-        )
-
         st.multiselect(
             "Bridge / Term",
             sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
@@ -415,6 +407,22 @@ def render_controls(display_df: pd.DataFrame) -> None:
             sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
             key="segment_multiselect",
         )
+
+
+
+def render_queue_filter_bar(display_df: pd.DataFrame) -> None:
+    asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
+
+    left, right = st.columns([2.2, 3.8], gap="small")
+    with left:
+        st.pills(
+            "Show deals for",
+            options=["All asset managers"] + asset_managers,
+            selection_mode="single",
+            default=st.session_state.get("am_scope_value", "All asset managers"),
+            key="am_scope_value",
+        )
+    with right:
         st.text_input(
             "Search deal number, name, or location",
             key="deal_search_input",
@@ -499,7 +507,7 @@ def render_metric_strip(selected: pd.Series) -> None:
     html.append("</div>")
     st.markdown("".join(html), unsafe_allow_html=True)
 
-    previous_week_comment = editable_text(selected.get("Previous Weekly Comment"))
+    previous_week_comment = editable_text(selected.get("Comment History"))
     last_comment_date = metric_date(selected.get("Last Comment Date"))
     popover_label = f"Previous weekly comment · {last_comment_date}" if last_comment_date != "-" else "Previous weekly comment"
 
@@ -598,6 +606,9 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
 
 
 def editable_field_input(field: str, current_value: str, picklists: dict[str, list[str]]) -> Any:
+    if field in {"Expected Resolution Type", "Expected Final Resolution"}:
+        return st.text_input(field, current_value)
+
     if field in MANUAL_ENTRY_PICKLIST_FIELDS and field in picklists:
         options = field_options(field, picklists, current_value)
         custom_option = "Type custom value"
@@ -750,7 +761,7 @@ def render_review_form(
 
             st.markdown("**Previous weekly comment**")
             st.markdown(
-                f"<div class='scroll-note'>{editable_text(selected.get('Previous Weekly Comment')) or '-'}</div>",
+                f"<div class='scroll-note'>{editable_text(selected.get('Comment History')) or '-'}</div>",
                 unsafe_allow_html=True,
             )
             with st.popover("Prior history", width="stretch"):
