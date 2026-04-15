@@ -263,6 +263,13 @@ def build_quarter_choices(start_year: int = 2026, start_quarter: int = 2, end_ye
 
 QUARTER_TIMING_OPTIONS = build_quarter_choices()
 
+OTHER_ENABLED_FIELDS = {
+    "Resolution Likelihood",
+    "Expected Resolution Type",
+    "Expected Final Resolution",
+    "Valuation Type",
+}
+
 
 def field_options(field: str, picklists: dict[str, list[str]], current_value: str) -> list[str]:
     if field in {"Resolution Timing", "Liquidity Event Timing"}:
@@ -625,6 +632,27 @@ def editable_field_input(field: str, current_value: str, picklists: dict[str, li
 
     if field in picklists or field in {"Resolution Timing", "Liquidity Event Timing"}:
         options = field_options(field, picklists, current_value)
+
+        if field in OTHER_ENABLED_FIELDS:
+            other_label = "Other"
+            select_options = options + ([other_label] if other_label not in options else [])
+            current_clean = (current_value or "").strip()
+            current_is_custom = bool(current_clean) and current_clean not in options
+            default_value = other_label if current_is_custom else (current_clean if current_clean in select_options else "")
+            selected_option = st.selectbox(
+                field,
+                select_options,
+                index=selected_index(select_options, default_value),
+                key=f"{field}_other_select_{abs(hash((field, current_value)))}",
+            )
+            if selected_option == other_label:
+                return st.text_input(
+                    f"{field} (custom)",
+                    value=current_clean if current_is_custom else "",
+                    key=f"{field}_other_text_{abs(hash((field, current_value, 'other')))}",
+                )
+            return selected_option
+
         return st.selectbox(field, options, index=selected_index(options, current_value))
 
     if field in LONG_TEXT_FIELDS or len(current_value) > 80:
