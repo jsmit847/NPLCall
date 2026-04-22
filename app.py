@@ -1352,7 +1352,46 @@ def main() -> None:
         st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
 
     render_queue_filter_bar(display_df)
-    sorted_df, comment_date, queue_view, workspace_mode, selected_sort = apply_filters(display_df)
+
+    am_scope = st.session_state.get("am_scope_value", "All asset managers")
+    search = st.session_state.get("deal_search_input", "")
+    sorted_df = display_df.copy()
+    show_hidden = st.session_state.get("show_hidden_checkbox", False)
+    if not show_hidden:
+        sorted_df = sorted_df[~sorted_df["_workbook_hidden"]]
+    if am_scope != "All asset managers":
+        sorted_df = sorted_df[sorted_df["Asset Manager"].astype(str).eq(am_scope)]
+    selected_bt = st.session_state.get("bridge_term_multiselect", [])
+    if selected_bt:
+        sorted_df = sorted_df[sorted_df["Bridge / Term"].astype(str).isin(selected_bt)]
+    selected_segment = st.session_state.get("segment_multiselect", [])
+    if selected_segment:
+        sorted_df = sorted_df[sorted_df["Segment"].astype(str).isin(selected_segment)]
+    if search:
+        needle = search.lower()
+        sorted_df = sorted_df[
+            sorted_df["Deal Number"].astype(str).str.lower().str.contains(needle)
+            | sorted_df["Deal Name"].astype(str).str.lower().str.contains(needle)
+            | sorted_df["Location"].astype(str).str.lower().str.contains(needle)
+        ]
+    if queue_view == "Missing current-week comment":
+        sorted_df = sorted_df[sorted_df["This Week Comment"].fillna("").astype(str).str.strip().eq("")]
+    elif queue_view == "Needs discussion":
+        sorted_df = sorted_df[sorted_df["Needs Discussion"].fillna(False)]
+    elif queue_view == "Has data flags":
+        sorted_df = sorted_df[sorted_df["Flag Count"] > 0]
+    selected_sort_value = st.session_state.get("presentation_order_slider", "Workbook file order")
+    selected_sort = "Workbook file order" if selected_sort_value == "Workbook file order" else "Asset Manager / Deal"
+    manual_sort = st.session_state.get("secondary_sort_select", "Use presentation order only")
+    if manual_sort == "Deal Name":
+        selected_sort = "Deal Name"
+    elif manual_sort == "UPB desc":
+        selected_sort = "UPB desc"
+    elif manual_sort == "Flag count desc":
+        selected_sort = "Flag count desc"
+    elif manual_sort == "Last comment date desc":
+        selected_sort = "Last comment date desc"
+    sorted_df = sort_deals(sorted_df, selected_sort).reset_index(drop=True)
 
     if sorted_df.empty:
         st.warning("No deals match the current filters.")
