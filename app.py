@@ -283,7 +283,7 @@ def apply_base_css() -> None:
             }
             .kpi-grid {
                 display: grid;
-                grid-template-columns: repeat(8, minmax(100px, 1fr));
+                grid-template-columns: repeat(7, minmax(110px, 1fr));
                 gap: 0.45rem;
                 margin-bottom: 0.45rem;
             }
@@ -930,16 +930,14 @@ def get_comments_highlight(selected: pd.Series) -> tuple[str, str]:
 
 
 def render_metric_strip(selected: pd.Series) -> None:
-    weekly_dq_label, weekly_dq_value = find_weekly_dq_status(selected)
     items = [
         ("Location", safe_text(selected.get("Location")), ""),
         ("UPB", metric_currency(selected.get("Current UPB")), ""),
+        ("Loan Commitment", metric_currency(selected.get("Loan Commitment")), ""),
+        ("Remaining Commitment", metric_currency(selected.get("Remaining Commitment")), ""),
         ("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")), ""),
         ("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")), ""),
-        ("ARV", metric_currency(selected.get("Salesforce ARV")), ""),
-        ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")), ""),
         ("Current DQ", safe_text(selected.get("Current DQ Status")), ""),
-        (weekly_dq_label, weekly_dq_value, ""),
     ]
     html = ["<div class='kpi-grid'>"]
     for label, value, subvalue in items:
