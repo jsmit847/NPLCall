@@ -453,8 +453,23 @@ def infer_quarter_label(workbook_name: str | None, snapshot_label: str | None) -
     return f"{q}Q{yy}"
 
 
+def build_quarter_choices(start_year: int = 2026, start_quarter: int = 1, end_year: int = 2030) -> list[str]:
+    options: list[str] = []
+    for year in range(start_year, end_year + 1):
+        first_q = start_quarter if year == start_year else 1
+        for quarter in range(first_q, 5):
+            options.append(f"{quarter}Q{str(year)[-2:]}")
+    return options
+
+
+QUARTER_TIMING_OPTIONS = build_quarter_choices()
+
+
 def field_options(field: str, picklists: dict[str, list[str]], current_value: str) -> list[str]:
-    options = [""] + picklists.get(field, [])
+    if field in {"Resolution Timing", "Liquidity Event Timing"}:
+        options = [""] + QUARTER_TIMING_OPTIONS.copy()
+    else:
+        options = [""] + picklists.get(field, [])
     current = (current_value or "").strip()
     if current and current not in options:
         options.append(current)
