@@ -1119,43 +1119,59 @@ def render_review_form(
 
         with right:
             st.subheader("Weekly comments")
+            st.markdown("**Previous weekly comment (from Addt'l NPL Comment)**")
             st.text_area(
                 "Previous weekly comment (from Addt'l NPL Comment)",
                 editable_text(selected.get("Previous Weekly Comment")),
                 disabled=True,
                 height=90,
+                label_visibility="collapsed",
             )
-            with st.expander("Full prior comment history", expanded=False):
+            with st.expander("**Full prior comment history**", expanded=False):
+                st.markdown("**Comment history**")
                 st.text_area(
                     "Comment history",
                     editable_text(selected.get("Comment History")),
                     disabled=True,
                     height=220,
+                    label_visibility="collapsed",
                 )
-            with st.expander("Salesforce AM comment", expanded=False):
+            with st.expander("**Salesforce AM comment**", expanded=False):
+                st.markdown("**Current Salesforce AM Comment**")
                 st.text_area(
                     "Current Salesforce AM Comment",
                     editable_text(selected.get("Current Salesforce AM Comment")),
                     disabled=True,
                     height=220,
+                    label_visibility="collapsed",
                 )
 
             template_options = field_options("Comment Template", {"Comment Template": COMMENT_TEMPLATE_OPTIONS}, "")
-            comment_template = st.selectbox("Quick comment helper", template_options, index=0)
+            st.markdown("**Quick comment helper**")
+            comment_template = st.selectbox(
+                "Quick comment helper",
+                template_options,
+                index=0,
+                label_visibility="collapsed",
+            )
+            st.markdown("**This week comment**")
             current_week = st.text_area(
                 "This week comment",
                 editable_text(selected.get("This Week Comment")),
                 height=150,
                 help="This will be prepended to the existing Addt'l NPL Comment history on save/export.",
+                label_visibility="collapsed",
             )
             built_comment = build_weekly_comment_text(current_week, comment_template)
             updates["This Week Comment"] = built_comment
             st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}" if built_comment else "No current-week comment entered yet.")
+            st.markdown("**Addt'l NPL Comment preview**")
             st.text_area(
                 "Addt'l NPL Comment preview",
                 editable_text(selected.get("Comments Preview")) if not built_comment else f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip(),
                 disabled=True,
                 height=170,
+                label_visibility="collapsed",
             )
 
         st.markdown("<div class='action-bar'>", unsafe_allow_html=True)
