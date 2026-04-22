@@ -283,7 +283,7 @@ def apply_base_css() -> None:
             }
             .kpi-grid {
                 display: grid;
-                grid-template-columns: repeat(7, minmax(110px, 1fr));
+                grid-template-columns: repeat(8, minmax(100px, 1fr));
                 gap: 0.45rem;
                 margin-bottom: 0.45rem;
             }
@@ -895,15 +895,51 @@ def render_deal_header(selected: pd.Series, queue_position: int, queue_total: in
     )
 
 
+
+def find_weekly_dq_status(selected: pd.Series) -> tuple[str, str]:
+    patterns = [
+        re.compile(r"^(\d{1,2}/\d{1,2})(?:/\d{2,4})?\s+DQ Status$", re.IGNORECASE),
+        re.compile(r"^(\d{1,2}/\d{1,2})(?:/\d{2,4})?\s+DQ$", re.IGNORECASE),
+    ]
+    dated_matches: list[tuple[tuple[int, int], str, str]] = []
+    for col in selected.index:
+        col_str = str(col).strip()
+        for pat in patterns:
+            m = pat.match(col_str)
+            if m:
+                month_day = m.group(1)
+                try:
+                    month, day = month_day.split("/")
+                    sort_key = (int(month), int(day))
+                except Exception:
+                    sort_key = (0, 0)
+                dated_matches.append((sort_key, col_str, safe_text(selected.get(col))))
+                break
+    if dated_matches:
+        dated_matches.sort(key=lambda x: x[0], reverse=True)
+        _, label, value = dated_matches[0]
+        return label, value
+    return "Weekly DQ Status", "-"
+
+
+def get_comments_highlight(selected: pd.Series) -> tuple[str, str]:
+    for field in ["Comments", "Comment", "Manual Comments", "Weekly Comments"]:
+        if field in selected.index:
+            return field, safe_text(selected.get(field))
+    return "Comments", safe_text(selected.get("Comment History"))
+
+
 def render_metric_strip(selected: pd.Series) -> None:
+    weekly_dq_label, weekly_dq_value = find_weekly_dq_status(selected)
     items = [
+        ("Location", safe_text(selected.get("Location")), ""),
         ("UPB", metric_currency(selected.get("Current UPB")), ""),
         ("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")), ""),
         ("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")), ""),
         ("ARV", metric_currency(selected.get("Salesforce ARV")), ""),
         ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")), ""),
-        ("DQ", safe_text(selected.get("Current DQ Status")), ""),
-        ("Last comment date", metric_date(selected.get("Last Comment Date")), ""),
+        ("Current DQ", safe_text(selected.get("Current DQ Status")), ""),
+        (weekly_dq_label, weekly_dq_value, ""),
     ]
     html = ["<div class='kpi-grid'>"]
     for label, value, subvalue in items:
@@ -914,8 +950,10 @@ def render_metric_strip(selected: pd.Series) -> None:
         )
     html.append("</div>")
     st.markdown("".join(html), unsafe_allow_html=True)
+
+    comments_label, comments_value = get_comments_highlight(selected)
     st.markdown(
-        f"<div class='kpi-comment'><div class='label'>Previous weekly comment</div><div class='value'>{safe_text(selected.get('Previous Weekly Comment'))}</div></div>",
+        f"<div class='kpi-comment'><div class='label'>{comments_label}</div><div class='value'>{comments_value}</div></div>",
         unsafe_allow_html=True,
     )
 
