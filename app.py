@@ -1412,6 +1412,25 @@ def main() -> None:
 
     if sorted_df.empty:
         st.warning("No deals match the current filters.")
+        reset1, reset2, reset3 = st.columns(3)
+        with reset1:
+            if st.button("Show all asset managers", width="stretch"):
+                st.session_state["am_scope_value"] = "All asset managers"
+                st.rerun()
+        with reset2:
+            if st.button("Clear search", width="stretch"):
+                st.session_state["deal_search_input"] = ""
+                st.rerun()
+        with reset3:
+            if st.button("Reset all filters", width="stretch"):
+                st.session_state["am_scope_value"] = "All asset managers"
+                st.session_state["deal_search_input"] = ""
+                st.session_state["bridge_term_multiselect"] = []
+                st.session_state["segment_multiselect"] = []
+                st.session_state["queue_focus_select"] = "All deals"
+                st.session_state["secondary_sort_select"] = "Use presentation order only"
+                st.rerun()
+        st.info("Choose another Asset Manager above, clear the search, or reset filters to continue.")
         return
 
     if workspace_mode == "Review workspace":
