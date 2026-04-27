@@ -715,7 +715,7 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
     with st.sidebar:
         st.header("Review controls")
-        st.caption("Choose the presentation order and filters here before stepping through deals.")
+        st.caption("Use the sidebar filters below to narrow the walkthrough by Asset Manager, Segment, or Search.")
 
         workspace_mode = st.radio(
             "Workspace",
@@ -752,7 +752,7 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         if current_am not in am_options:
             current_am = "All asset managers"
         am_scope = st.selectbox(
-            "Asset Manager",
+            "Asset Manager filter",
             am_options,
             index=am_options.index(current_am),
             key="am_scope_select",
@@ -763,7 +763,7 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
         if current_segment not in segment_options:
             current_segment = "All segments"
         segment_scope = st.selectbox(
-            "Segment",
+            "Segment filter",
             segment_options,
             index=segment_options.index(current_segment),
             key="segment_scope_select",
