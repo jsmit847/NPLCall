@@ -453,23 +453,8 @@ def infer_quarter_label(workbook_name: str | None, snapshot_label: str | None) -
     return f"{q}Q{yy}"
 
 
-def build_quarter_choices(start_year: int = 2026, start_quarter: int = 1, end_year: int = 2030) -> list[str]:
-    options: list[str] = []
-    for year in range(start_year, end_year + 1):
-        first_q = start_quarter if year == start_year else 1
-        for quarter in range(first_q, 5):
-            options.append(f"{quarter}Q{str(year)[-2:]}")
-    return options
-
-
-QUARTER_TIMING_OPTIONS = build_quarter_choices()
-
-
 def field_options(field: str, picklists: dict[str, list[str]], current_value: str) -> list[str]:
-    if field in {"Resolution Timing", "Liquidity Event Timing"}:
-        options = [""] + QUARTER_TIMING_OPTIONS.copy()
-    else:
-        options = [""] + picklists.get(field, [])
+    options = [""] + picklists.get(field, [])
     current = (current_value or "").strip()
     if current and current not in options:
         options.append(current)
@@ -730,7 +715,7 @@ def get_active_workbook() -> tuple[bytes | None, str | None]:
 def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, str, str]:
     with st.sidebar:
         st.header("Review controls")
-        st.caption("Choose the presentation order here before stepping through deals.")
+        st.caption("Choose the presentation order and filters here before stepping through deals.")
 
         workspace_mode = st.radio(
             "Workspace",
@@ -750,24 +735,44 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             key="show_hidden_checkbox",
         )
 
+        asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
+        segments = sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x])
+
         st.markdown("**Presentation order**")
         presentation_order = st.select_slider(
             "Presentation order",
             options=["Workbook file order", "Asset Manager order"],
             value=st.session_state.get("presentation_order_slider", "Workbook file order"),
             key="presentation_order_slider",
-            help="Slide this to choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
+            help="Choose whether the queue follows the uploaded workbook order or groups deals by Asset Manager.",
+        )
+
+        am_options = ["All asset managers"] + asset_managers if asset_managers else ["All asset managers"]
+        current_am = st.session_state.get("am_scope_select", "All asset managers")
+        if current_am not in am_options:
+            current_am = "All asset managers"
+        am_scope = st.selectbox(
+            "Asset Manager",
+            am_options,
+            index=am_options.index(current_am),
+            key="am_scope_select",
+        )
+
+        segment_options = ["All segments"] + segments if segments else ["All segments"]
+        current_segment = st.session_state.get("segment_scope_select", "All segments")
+        if current_segment not in segment_options:
+            current_segment = "All segments"
+        segment_scope = st.selectbox(
+            "Segment",
+            segment_options,
+            index=segment_options.index(current_segment),
+            key="segment_scope_select",
         )
 
         selected_bt = st.multiselect(
             "Bridge / Term",
             sorted([x for x in display_df["Bridge / Term"].dropna().astype(str).unique().tolist() if x]),
             key="bridge_term_multiselect",
-        )
-        selected_segment = st.multiselect(
-            "Segment",
-            sorted([x for x in display_df["Segment"].dropna().astype(str).unique().tolist() if x]),
-            key="segment_multiselect",
         )
         queue_view = st.selectbox(
             "Queue focus",
@@ -792,9 +797,10 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
             key="secondary_sort_select",
             help="Leave this on presentation order only unless you want a different secondary sort.",
         )
-
-    am_scope = st.session_state.get("am_scope_value", "All asset managers")
-    search = st.session_state.get("deal_search_input", "")
+        search = st.text_input(
+            "Search deal number, name, or location",
+            key="deal_search_input",
+        )
 
     filtered_df = display_df.copy()
     if not show_hidden:
@@ -803,10 +809,11 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
     if am_scope != "All asset managers":
         filtered_df = filtered_df[filtered_df["Asset Manager"].astype(str).eq(am_scope)]
 
+    if segment_scope != "All segments":
+        filtered_df = filtered_df[filtered_df["Segment"].astype(str).eq(segment_scope)]
+
     if selected_bt:
         filtered_df = filtered_df[filtered_df["Bridge / Term"].astype(str).isin(selected_bt)]
-    if selected_segment:
-        filtered_df = filtered_df[filtered_df["Segment"].astype(str).isin(selected_segment)]
     if search:
         needle = search.lower()
         filtered_df = filtered_df[
@@ -836,30 +843,6 @@ def apply_filters(display_df: pd.DataFrame) -> tuple[pd.DataFrame, date, str, st
     return sorted_df, comment_date, queue_view, workspace_mode, selected_sort
 
 
-
-def render_queue_filter_bar(display_df: pd.DataFrame) -> None:
-    asset_managers = sorted([x for x in display_df["Asset Manager"].dropna().astype(str).unique().tolist() if x])
-
-    left, right = st.columns([2.3, 3.7], gap="small")
-    with left:
-        options = ["All asset managers"] + asset_managers
-        current = st.session_state.get("am_scope_value", "All asset managers")
-        if current not in options:
-            current = "All asset managers"
-        st.selectbox(
-            "Asset Manager",
-            options,
-            index=options.index(current),
-            key="am_scope_value",
-        )
-    with right:
-        st.text_input(
-            "Search deal number, name, or location",
-            key="deal_search_input",
-        )
-
-
-
 def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
     option_rows = sorted_df["_excel_row"].tolist()
     if not option_rows:
@@ -869,8 +852,9 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
         st.session_state["selected_row"] = option_rows[0]
 
     current_idx = option_rows.index(st.session_state["selected_row"])
+    current_am = safe_text(sorted_df[sorted_df["_excel_row"] == st.session_state["selected_row"]].iloc[0].get("Asset Manager"))
 
-    nav1, nav2, nav3 = st.columns([1, 1, 5])
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 1.35, 4.65])
     with nav1:
         if st.button("Previous", disabled=current_idx == 0, width="stretch"):
             st.session_state["selected_row"] = option_rows[current_idx - 1]
@@ -880,6 +864,17 @@ def render_queue_navigation(sorted_df: pd.DataFrame) -> None:
             st.session_state["selected_row"] = option_rows[current_idx + 1]
             st.rerun()
     with nav3:
+        if st.button("Next same AM", width="stretch"):
+            next_same_am = None
+            for row_num in option_rows[current_idx + 1:]:
+                row_am = safe_text(sorted_df[sorted_df["_excel_row"] == row_num].iloc[0].get("Asset Manager"))
+                if row_am == current_am:
+                    next_same_am = row_num
+                    break
+            if next_same_am is not None:
+                st.session_state["selected_row"] = next_same_am
+                st.rerun()
+    with nav4:
         selected_row = st.selectbox(
             "Deal queue",
             option_rows,
@@ -910,49 +905,15 @@ def render_deal_header(selected: pd.Series, queue_position: int, queue_total: in
     )
 
 
-
-def find_weekly_dq_status(selected: pd.Series) -> tuple[str, str]:
-    patterns = [
-        re.compile(r"^(\d{1,2}/\d{1,2})(?:/\d{2,4})?\s+DQ Status$", re.IGNORECASE),
-        re.compile(r"^(\d{1,2}/\d{1,2})(?:/\d{2,4})?\s+DQ$", re.IGNORECASE),
-    ]
-    dated_matches: list[tuple[tuple[int, int], str, str]] = []
-    for col in selected.index:
-        col_str = str(col).strip()
-        for pat in patterns:
-            m = pat.match(col_str)
-            if m:
-                month_day = m.group(1)
-                try:
-                    month, day = month_day.split("/")
-                    sort_key = (int(month), int(day))
-                except Exception:
-                    sort_key = (0, 0)
-                dated_matches.append((sort_key, col_str, safe_text(selected.get(col))))
-                break
-    if dated_matches:
-        dated_matches.sort(key=lambda x: x[0], reverse=True)
-        _, label, value = dated_matches[0]
-        return label, value
-    return "Weekly DQ Status", "-"
-
-
-def get_comments_highlight(selected: pd.Series) -> tuple[str, str]:
-    for field in ["Comments", "Comment", "Manual Comments", "Weekly Comments"]:
-        if field in selected.index:
-            return field, safe_text(selected.get(field))
-    return "Comments", safe_text(selected.get("Comment History"))
-
-
 def render_metric_strip(selected: pd.Series) -> None:
     items = [
-        ("Location", safe_text(selected.get("Location")), ""),
         ("UPB", metric_currency(selected.get("Current UPB")), ""),
-        ("Loan Commitment", metric_currency(selected.get("Loan Commitment")), ""),
-        ("Remaining Commitment", metric_currency(selected.get("Remaining Commitment")), ""),
         ("As-Is", metric_currency(selected.get("Salesforce As-Is Valuation")), ""),
         ("As-Is LTV", metric_pct(selected.get("Salesforce Implied As-Is LTV")), ""),
-        ("Current DQ", safe_text(selected.get("Current DQ Status")), ""),
+        ("ARV", metric_currency(selected.get("Salesforce ARV")), ""),
+        ("ARV LTV", metric_pct(selected.get("Salesforce ARV LTV")), ""),
+        ("DQ", safe_text(selected.get("Current DQ Status")), ""),
+        ("Last comment date", metric_date(selected.get("Last Comment Date")), ""),
     ]
     html = ["<div class='kpi-grid'>"]
     for label, value, subvalue in items:
@@ -963,10 +924,8 @@ def render_metric_strip(selected: pd.Series) -> None:
         )
     html.append("</div>")
     st.markdown("".join(html), unsafe_allow_html=True)
-
-    comments_label, comments_value = get_comments_highlight(selected)
     st.markdown(
-        f"<div class='kpi-comment'><div class='label'>{comments_label}</div><div class='value'>{comments_value}</div></div>",
+        f"<div class='kpi-comment'><div class='label'>Previous weekly comment</div><div class='value'>{safe_text(selected.get('Previous Weekly Comment'))}</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -1057,9 +1016,6 @@ def render_property_summary(selected: pd.Series, properties_df: pd.DataFrame) ->
 
 
 def editable_field_input(field: str, current_value: str, picklists: dict[str, list[str]]) -> Any:
-    if field in {"Expected Resolution Type", "Expected Final Resolution"}:
-        return st.text_input(field, current_value)
-
     if field in MANUAL_ENTRY_PICKLIST_FIELDS and field in picklists:
         options = field_options(field, picklists, current_value)
         custom_option = "Type custom value"
@@ -1131,6 +1087,49 @@ def render_snapshot_grid(selected: pd.Series) -> None:
     st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
+def build_presenter_prompts(selected: pd.Series) -> list[str]:
+    prompts: list[str] = [
+        "What changed this week, and is the Comments field fully updated?",
+        "Is the expected resolution still the right path for this deal?",
+        "Is the current timing estimate still the right quarter?",
+    ]
+
+    dq_status = safe_text(selected.get("Current DQ Status"))
+    if dq_status != "-":
+        prompts.append(f"What is driving the current DQ status ({dq_status})?")
+
+    if safe_text(selected.get("Expected Resolution Type")) == "-":
+        prompts.append("What should the expected resolution type be today?")
+    if safe_text(selected.get("Expected Final Resolution")) == "-":
+        prompts.append("What is the expected final resolution outcome?")
+    if safe_text(selected.get("Resolution Timing")) == "-":
+        prompts.append("What quarter should we be using for resolution timing?")
+    if safe_text(selected.get("Liquidity Event Timing")) == "-":
+        prompts.append("What quarter should we be using for liquidity event timing?")
+
+    remaining_commitment = normalize_number(selected.get("Remaining Commitment"))
+    if remaining_commitment not in (None, 0):
+        prompts.append("Do we still expect any meaningful future funding exposure from the remaining commitment?")
+
+    if safe_text(selected.get("Third Party Offer Amount")) != "-":
+        prompts.append("Is the third-party offer still current and actionable?")
+    if safe_text(selected.get("Valuation Type")) == "-":
+        prompts.append("What valuation basis are we relying on right now?")
+
+    seen: list[str] = []
+    for prompt in prompts:
+        if prompt not in seen:
+            seen.append(prompt)
+    return seen[:6]
+
+
+def render_presenter_prompts(selected: pd.Series) -> None:
+    with st.popover("Presenter prompts"):
+        st.markdown("**Presenter prompts**")
+        for prompt in build_presenter_prompts(selected):
+            st.markdown(f"- {prompt}")
+
+
 def render_review_form(
     selected: pd.Series,
     picklists: dict[str, list[str]],
@@ -1139,6 +1138,7 @@ def render_review_form(
 ) -> dict[str, Any] | None:
     render_metric_strip(selected)
     render_status_chips(selected)
+    render_presenter_prompts(selected)
     with st.form(f"detail_form_{int(selected['_excel_row'])}"):
         updates: dict[str, Any] = {}
 
@@ -1170,59 +1170,43 @@ def render_review_form(
 
         with right:
             st.subheader("Weekly comments")
-            st.markdown("**Previous weekly comment (from Addt'l NPL Comment)**")
             st.text_area(
                 "Previous weekly comment (from Addt'l NPL Comment)",
                 editable_text(selected.get("Previous Weekly Comment")),
                 disabled=True,
                 height=90,
-                label_visibility="collapsed",
             )
-            with st.expander("**Full prior comment history**", expanded=False):
-                st.markdown("**Comment history**")
+            with st.expander("Full prior comment history", expanded=False):
                 st.text_area(
                     "Comment history",
                     editable_text(selected.get("Comment History")),
                     disabled=True,
                     height=220,
-                    label_visibility="collapsed",
                 )
-            with st.expander("**Salesforce AM comment**", expanded=False):
-                st.markdown("**Current Salesforce AM Comment**")
+            with st.expander("Salesforce AM comment", expanded=False):
                 st.text_area(
                     "Current Salesforce AM Comment",
                     editable_text(selected.get("Current Salesforce AM Comment")),
                     disabled=True,
                     height=220,
-                    label_visibility="collapsed",
                 )
 
             template_options = field_options("Comment Template", {"Comment Template": COMMENT_TEMPLATE_OPTIONS}, "")
-            st.markdown("**Quick comment helper**")
-            comment_template = st.selectbox(
-                "Quick comment helper",
-                template_options,
-                index=0,
-                label_visibility="collapsed",
-            )
-            st.markdown("**This week comment**")
+            comment_template = st.selectbox("Quick comment helper", template_options, index=0)
             current_week = st.text_area(
                 "This week comment",
                 editable_text(selected.get("This Week Comment")),
                 height=150,
                 help="This will be prepended to the existing Addt'l NPL Comment history on save/export.",
-                label_visibility="collapsed",
             )
             built_comment = build_weekly_comment_text(current_week, comment_template)
             updates["This Week Comment"] = built_comment
             st.caption(f"Addt'l NPL Comment will save as: {format_comment_entry_date(comment_date)} - {built_comment}" if built_comment else "No current-week comment entered yet.")
-            st.markdown("**Addt'l NPL Comment preview**")
             st.text_area(
                 "Addt'l NPL Comment preview",
                 editable_text(selected.get("Comments Preview")) if not built_comment else f"{format_comment_entry_date(comment_date)} - {built_comment}\n{editable_text(selected.get('Comment History'))}".strip(),
                 disabled=True,
                 height=170,
-                label_visibility="collapsed",
             )
 
         st.markdown("<div class='action-bar'>", unsafe_allow_html=True)
@@ -1415,73 +1399,22 @@ def main() -> None:
         reset1, reset2, reset3 = st.columns(3)
         with reset1:
             if st.button("Show all asset managers", width="stretch"):
-                st.session_state["am_scope_value"] = "All asset managers"
+                st.session_state["am_scope_select"] = "All asset managers"
                 st.rerun()
         with reset2:
+            if st.button("Show all segments", width="stretch"):
+                st.session_state["segment_scope_select"] = "All segments"
+                st.rerun()
+        with reset3:
             if st.button("Clear search", width="stretch"):
                 st.session_state["deal_search_input"] = ""
                 st.rerun()
-        with reset3:
-            if st.button("Reset all filters", width="stretch"):
-                st.session_state["am_scope_value"] = "All asset managers"
-                st.session_state["deal_search_input"] = ""
-                st.session_state["bridge_term_multiselect"] = []
-                st.session_state["segment_multiselect"] = []
-                st.session_state["queue_focus_select"] = "All deals"
-                st.session_state["secondary_sort_select"] = "Use presentation order only"
-                st.rerun()
-        st.info("Choose another Asset Manager above, clear the search, or reset filters to continue.")
+        st.info("Adjust Asset Manager, Segment, or Search in the sidebar to continue.")
         return
 
     if workspace_mode == "Review workspace":
         order_label = "workbook file order" if selected_sort == "Workbook file order" else selected_sort.lower()
         st.caption(f"Current review queue: {order_label} · {len(sorted_df):,} deal(s) in scope")
-
-    render_queue_filter_bar(display_df)
-
-    am_scope = st.session_state.get("am_scope_value", "All asset managers")
-    search = st.session_state.get("deal_search_input", "")
-    sorted_df = display_df.copy()
-    show_hidden = st.session_state.get("show_hidden_checkbox", False)
-    if not show_hidden:
-        sorted_df = sorted_df[~sorted_df["_workbook_hidden"]]
-    if am_scope != "All asset managers":
-        sorted_df = sorted_df[sorted_df["Asset Manager"].astype(str).eq(am_scope)]
-    selected_bt = st.session_state.get("bridge_term_multiselect", [])
-    if selected_bt:
-        sorted_df = sorted_df[sorted_df["Bridge / Term"].astype(str).isin(selected_bt)]
-    selected_segment = st.session_state.get("segment_multiselect", [])
-    if selected_segment:
-        sorted_df = sorted_df[sorted_df["Segment"].astype(str).isin(selected_segment)]
-    if search:
-        needle = search.lower()
-        sorted_df = sorted_df[
-            sorted_df["Deal Number"].astype(str).str.lower().str.contains(needle)
-            | sorted_df["Deal Name"].astype(str).str.lower().str.contains(needle)
-            | sorted_df["Location"].astype(str).str.lower().str.contains(needle)
-        ]
-    if queue_view == "Missing current-week comment":
-        sorted_df = sorted_df[sorted_df["This Week Comment"].fillna("").astype(str).str.strip().eq("")]
-    elif queue_view == "Needs discussion":
-        sorted_df = sorted_df[sorted_df["Needs Discussion"].fillna(False)]
-    elif queue_view == "Has data flags":
-        sorted_df = sorted_df[sorted_df["Flag Count"] > 0]
-    selected_sort_value = st.session_state.get("presentation_order_slider", "Workbook file order")
-    selected_sort = "Workbook file order" if selected_sort_value == "Workbook file order" else "Asset Manager / Deal"
-    manual_sort = st.session_state.get("secondary_sort_select", "Use presentation order only")
-    if manual_sort == "Deal Name":
-        selected_sort = "Deal Name"
-    elif manual_sort == "UPB desc":
-        selected_sort = "UPB desc"
-    elif manual_sort == "Flag count desc":
-        selected_sort = "Flag count desc"
-    elif manual_sort == "Last comment date desc":
-        selected_sort = "Last comment date desc"
-    sorted_df = sort_deals(sorted_df, selected_sort).reset_index(drop=True)
-
-    if sorted_df.empty:
-        st.warning("No deals match the current filters.")
-        return
 
     render_queue_navigation(sorted_df)
 
